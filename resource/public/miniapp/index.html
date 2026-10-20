@@ -150,6 +150,8 @@
       <label for="paragraphs">Script length: <span id="paragraph-label">1 paragraph</span></label>
       <input id="paragraphs" type="range" min="1" max="4" value="1" />
       <label class="check"><input id="subtitles" type="checkbox" checked /> Burn subtitles into the video</label>
+      <label class="check"><input id="auto-publish" type="checkbox" /> After it finishes, publish to the default target</label>
+      <p class="credit"><a href="/accounts">Manage YouTube channels and TikTok accounts</a></p>
       <button class="primary" id="generate" type="button">Generate video</button>
       <div id="message" class="banner hidden"></div>
     </section>
@@ -160,6 +162,24 @@
       <progress id="bar" max="100" value="0"></progress>
       <video id="player" class="hidden" controls playsinline></video>
       <a id="download" class="download hidden" href="#">Download the video</a>
+      <div id="publish-box" class="hidden">
+        <label for="pub-title">Title</label>
+        <input id="pub-title" maxlength="150" />
+        <label for="pub-description">Description</label>
+        <textarea id="pub-description"></textarea>
+        <label for="pub-tags">Hashtags</label>
+        <input id="pub-tags" placeholder="#Shorts #story" />
+        <label for="pub-privacy">Privacy</label>
+        <select id="pub-privacy">
+          <option value="public">Public</option>
+          <option value="unlisted">Unlisted on YouTube, private on TikTok</option>
+          <option value="private">Private</option>
+        </select>
+        <label class="check"><input id="vary-copy" type="checkbox" /> Write a different caption for each account</label>
+        <div id="account-picks"></div>
+        <button class="primary" id="publish-selected" type="button">Publish to selected accounts</button>
+        <div id="publish-results"></div>
+      </div>
       <button class="ghost" id="again" type="button">Make another</button>
     </section>
   </main>
@@ -344,6 +364,7 @@
           link.href = data.download_url;
           link.classList.remove("hidden");
           showMessage("The video is ready.", "info");
+          showPublish(data.task_id || state.taskId);
           return;
         }
       } catch (error) {
@@ -351,6 +372,109 @@
       }
       state.timer = setTimeout(poll, 3000);
     }
+
+    const picked = new Set();
+
+    function renderAccounts(accounts) {
+      const box = $("account-picks");
+      box.replaceChildren();
+      if (!accounts.length) {
+        const note = document.createElement("p");
+        note.textContent = "No accounts linked yet.";
+        const link = document.createElement("a");
+        link.href = "/accounts";
+        link.textContent = "Link YouTube or TikTok";
+        box.append(note, link);
+        return;
+      }
+      accounts.forEach((account) => {
+        const row = document.createElement("label");
+        row.className = "check";
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.checked = true;
+        input.addEventListener("change", () => {
+          if (input.checked) picked.add(account.id);
+          else picked.delete(account.id);
+        });
+        picked.add(account.id);
+        row.append(input, document.createTextNode(
+          " " + account.platform + " · " + account.label + (account.needs_reauth ? " (link again)" : "")
+        ));
+        box.appendChild(row);
+      });
+    }
+
+    async function showPublish(taskId) {
+      $("publish-box").classList.remove("hidden");
+      try {
+        const setupResponse = await fetch("/api/v1/publish/setup", { headers: headers() });
+        const setupBody = await setupResponse.json().catch(() => ({}));
+        const setup = setupBody.data || {};
+        renderAccounts(setup.accounts || []);
+        const metaResponse = await fetch("/api/v1/publish/metadata", {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify({ task_id: taskId, platform: "youtube" }),
+        });
+        const metaBody = await metaResponse.json().catch(() => ({}));
+        const draft = metaBody.data || {};
+        if (draft.title) $("pub-title").value = draft.title;
+        if (draft.description) $("pub-description").value = draft.description;
+        if (Array.isArray(draft.hashtags)) $("pub-tags").value = draft.hashtags.join(" ");
+        const target = (setup.targets || []).find((item) => item.is_default);
+        if ($("auto-publish").checked && target) {
+          await sendPublish({ target_id: target.id, title: $("pub-title").value, description: $("pub-description").value, hashtags: $("pub-tags").value });
+        }
+      } catch (error) {
+        showMessage("The video is ready, but publishing details could not be loaded.", "error");
+      }
+    }
+
+    async function sendPublish(extra) {
+      const tags = $("pub-tags").value.split(/[\s,]+/).filter(Boolean);
+      const response = await fetch("/api/v1/publish", {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify(Object.assign({
+          task_id: state.taskId,
+          account_ids: Array.from(picked),
+          title: $("pub-title").value,
+          description: $("pub-description").value,
+          hashtags: tags,
+          privacy: $("pub-privacy").value,
+          vary_copy: $("vary-copy").checked,
+        }, extra || {})),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        showMessage(body.message || "Publishing did not start.", "error");
+        return;
+      }
+      const jobs = (body.data && body.data.jobs) || [];
+      $("publish-results").textContent = jobs.map((job) => job.account_label + ": " + job.state).join("\n");
+      pollJobs(jobs.map((job) => job.id));
+    }
+
+    async function pollJobs(ids) {
+      if (!ids.length) return;
+      const lines = [];
+      let pending = false;
+      for (const id of ids) {
+        const response = await fetch("/api/v1/publish/jobs/" + encodeURIComponent(id), { headers: headers() });
+        const body = await response.json().catch(() => ({}));
+        const job = body.data || {};
+        const link = job.youtube_url || job.tiktok_status || job.error || job.state;
+        lines.push((job.account_label || id) + ": " + link);
+        if (job.state !== "complete" && job.state !== "failed") pending = true;
+      }
+      $("publish-results").textContent = lines.join("\n");
+      if (pending) setTimeout(() => pollJobs(ids), 4000);
+    }
+
+    $("publish-selected").addEventListener("click", () => {
+      sendPublish({}).catch(() => showMessage("The publish request did not go through.", "error"));
+    });
 
     $("paragraphs").addEventListener("input", updateParagraphLabel);
     $("generate").addEventListener("click", generate);

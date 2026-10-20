@@ -51,6 +51,9 @@ async def application_lifespan(_: FastAPI):
 
     check_ffmpeg_ready()
     start_retention_worker()
+    from app.publish.queue import start_publish_worker
+
+    start_publish_worker()
     try:
         register_integration(load_telegram_settings())
     except Exception as exc:

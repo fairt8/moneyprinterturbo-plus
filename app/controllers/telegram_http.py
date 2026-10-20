@@ -85,7 +85,7 @@ def _watch_later(chat_id: int, task_id: str, topic: str, user_id: int) -> None:
                 break
             await asyncio.sleep(settings.poll_interval_seconds)
         if int(snapshot.get("state") or 0) == 1:
-            await _deliver(bot, chat_id, task_id, snapshot)
+            await _deliver(bot, chat_id, task_id, snapshot, user_id)
 
     def _thread():
         import asyncio
@@ -96,6 +96,44 @@ def _watch_later(chat_id: int, task_id: str, topic: str, user_id: int) -> None:
             logger.exception(f"webhook progress watcher failed: {exc}")
 
     threading.Thread(target=_thread, name=f"tg-watch-{task_id[:8]}", daemon=True).start()
+
+
+def _watch_publish_later(chat_id: int, user_id: int, job_ids: list[str]) -> None:
+    settings = load_telegram_settings()
+    publisher = getattr(get_api_conversation(), "publisher", None)
+    if publisher is None:
+        return
+
+    def _thread():
+        import time
+
+        from app.telegram.publish_flow import describe_job
+
+        pending = set(job_ids)
+        deadline = time.time() + settings.task_timeout_seconds
+        while pending and time.time() < deadline:
+            time.sleep(settings.poll_interval_seconds)
+            for job_id in list(pending):
+                try:
+                    job = publisher.job(f"tg:{user_id}", job_id)
+                except Exception as exc:
+                    pending.discard(job_id)
+                    bot_request(
+                        settings.bot_token,
+                        "sendMessage",
+                        {"chat_id": chat_id, "text": f"Could not read a publish job.\n{exc}"},
+                    )
+                    continue
+                if not job or job.get("state") in {"complete", "failed"}:
+                    pending.discard(job_id)
+                    if job:
+                        bot_request(
+                            settings.bot_token,
+                            "sendMessage",
+                            {"chat_id": chat_id, "text": describe_job(job)},
+                        )
+
+    threading.Thread(target=_thread, name="tg-publish", daemon=True).start()
 
 
 @router.post("/telegram/webhook", include_in_schema=False)
@@ -145,4 +183,12 @@ async def telegram_webhook(request: Request):
                 session.get("topic") or "your video",
                 user_id,
             )
+    if reply and reply.watch_publish_ids:
+        message = update.get("message") or (update.get("callback_query") or {}).get("message") or {}
+        chat = message.get("chat") or {}
+        user = (update.get("callback_query") or update.get("message") or {}).get("from") or {}
+        chat_id = chat.get("id")
+        user_id = user.get("id")
+        if isinstance(chat_id, int) and isinstance(user_id, int):
+            _watch_publish_later(chat_id, user_id, list(reply.watch_publish_ids))
     return {"ok": True}

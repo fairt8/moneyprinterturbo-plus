@@ -596,6 +596,8 @@ def save_config():
         config_to_save["diagnostics"] = dict(diagnostics)
         if telegram or "telegram" in _cfg:
             config_to_save["telegram"] = dict(telegram)
+        if publish or "publish" in _cfg:
+            config_to_save["publish"] = dict(publish)
         serialized_config = toml.dumps(config_to_save)
 
         # WebUI 完整 rerun 结束时会调用保存。内容没有变化时直接返回，避免每次
@@ -663,8 +665,9 @@ ui = _SynchronizedConfig(
     )
 )
 telegram = _SynchronizedConfig(_cfg.get("telegram", {}))
+publish = _SynchronizedConfig(_cfg.get("publish", {}))
 
-_applied_environment = apply_environment_overrides(app, telegram)
+_applied_environment = apply_environment_overrides(app, telegram, publish=publish)
 if _applied_environment:
     logger.info(
         "applied environment overrides: " + ", ".join(_applied_environment)

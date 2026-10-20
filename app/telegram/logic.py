@@ -42,6 +42,7 @@ class Reply:
     text: str
     buttons: list[list[dict]] | None = None
     watch_task_id: str | None = None
+    watch_publish_ids: list[str] | None = None
 
 
 _VOICE_RE = re.compile(VOICE_NAME_RE_SOURCE)
@@ -62,9 +63,13 @@ class Conversation:
     sessions: SessionStore
     rate_limiter: RateLimiter
     pipeline: object
+    publisher: object | None = None
     _defaults: dict = field(init=False)
 
     def __post_init__(self) -> None:
+        from app.telegram.publish_flow import PublishFlow
+
+        self.publish_flow = PublishFlow(self)
         self._defaults = {
             "aspect": self.settings.default_aspect
             if self.settings.default_aspect in VALID_ASPECTS
@@ -109,7 +114,8 @@ class Conversation:
             "4. When it finishes I send the video, or a download link if it is "
             "too large for Telegram.\n\n"
             "/new clears the topic. /settings shows the current options. "
-            "/status checks the latest video.\n"
+            "/status checks the latest video. /accounts links YouTube channels "
+            "and TikTok accounts and chooses who receives a finished video.\n"
             f"{limit_line}",
             buttons=self._start_buttons(),
         )
@@ -153,6 +159,9 @@ class Conversation:
         body = (text or "").strip()
         if not body:
             return Reply("Send a topic, or use /help.")
+        publish_reply = self.publish_flow.on_text(user_id, body)
+        if publish_reply is not None:
+            return publish_reply
         if session.get("awaiting") == "voice":
             if not _VOICE_RE.match(body) or len(body) > 80:
                 return Reply(
@@ -178,6 +187,9 @@ class Conversation:
         session = self._load(user_id)
         data = (data or "").strip()
 
+        publish_reply = self.publish_flow.on_callback(user_id, data)
+        if publish_reply is not None:
+            return publish_reply
         if data == "go":
             return self._generate(user_id, session)
         if data == "menu":
@@ -308,6 +320,7 @@ class Conversation:
                     {"text": "Language", "callback_data": "lang"},
                 ],
                 [{"text": "Subtitles", "callback_data": "subs"}],
+                [{"text": "Accounts", "callback_data": "ac"}],
             ]
         )
         return rows

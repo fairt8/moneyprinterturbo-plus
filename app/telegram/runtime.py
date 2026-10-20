@@ -47,13 +47,25 @@ def get_rate_limiter(settings: TelegramSettings | None = None) -> RateLimiter:
         return _limiter
 
 
-def _build(pipeline) -> Conversation:
+def _publisher(local: bool):
+    settings = load_telegram_settings()
+    if local:
+        from app.telegram.publish_local import LocalPublisher
+
+        return LocalPublisher(settings.media_secret())
+    from app.telegram.publish_client import HttpPublisher
+
+    return HttpPublisher(settings)
+
+
+def _build(pipeline, *, local: bool) -> Conversation:
     settings = load_telegram_settings()
     return Conversation(
         settings=settings,
         sessions=get_session_store(),
         rate_limiter=get_rate_limiter(settings),
         pipeline=pipeline,
+        publisher=_publisher(local),
     )
 
 
@@ -67,7 +79,7 @@ def get_conversation(pipeline=None) -> Conversation:
                 from app.telegram.http_pipeline import HttpPipeline
 
                 pipeline = HttpPipeline(load_telegram_settings())
-            _conversation = _build(pipeline)
+            _conversation = _build(pipeline, local=False)
         return _conversation
 
 
@@ -80,7 +92,7 @@ def get_api_conversation() -> Conversation:
     with _lock:
         pipeline = getattr(_conversation, "pipeline", None)
         if _conversation is None or not isinstance(pipeline, InProcessPipeline):
-            _conversation = _build(InProcessPipeline())
+            _conversation = _build(InProcessPipeline(), local=True)
         return _conversation
 
 

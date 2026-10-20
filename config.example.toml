@@ -821,3 +821,32 @@ default_voice = "en-US-AriaNeural"
 default_paragraphs = 1
 default_language = ""
 default_subtitles = true
+
+# =============================================================================
+# Official YouTube and TikTok publishing
+# Put real client secrets in .env. See the README for the consent-screen steps.
+# Refresh tokens are not stored here. They are written under storage/publish/.
+# =============================================================================
+[publish]
+stagger_seconds = 20
+max_concurrent_jobs = 1
+vary_copy = false
+connect_ttl_seconds = 900
+youtube_redirect_uri = ""
+tiktok_client_key = ""
+tiktok_client_secret = ""
+tiktok_redirect_uri = ""
+# Leave false until TikTok approves the app. Direct posts stay private.
+tiktok_audited = false
+# direct posts immediately. inbox sends a draft the phone must finish.
+tiktok_default_mode = "direct"
+tiktok_daily_posts = 15
+
+# One block per Google Cloud project. videos.insert costs 1,600 quota units.
+# The default project quota is 10,000 units, about 6 uploads a day.
+[[publish.youtube_projects]]
+id = "default"
+client_id = ""
+client_secret = ""
+daily_upload_quota = 6
+

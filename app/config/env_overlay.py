@@ -38,6 +38,8 @@ def apply_environment_overrides(
     app: dict,
     telegram: dict,
     environ: Mapping[str, str] | None = None,
+    *,
+    publish: dict | None = None,
 ) -> list[str]:
     """Copy recognized environment variables into the live config dicts.
 
@@ -104,6 +106,9 @@ def apply_environment_overrides(
     take(telegram, "default_paragraphs", ("TELEGRAM_DEFAULT_PARAGRAPHS",), _int)
     take(telegram, "default_subtitles", ("TELEGRAM_DEFAULT_SUBTITLES",), _bool)
 
+    if publish is not None:
+        _apply_publish_environment(publish, env, applied, take)
+
     # A public URL should also make API download links absolute when the
     # operator did not set a separate endpoint.
     public_base = str(telegram.get("public_base_url") or "").strip()
@@ -111,3 +116,65 @@ def apply_environment_overrides(
         app["endpoint"] = public_base.rstrip("/")
 
     return applied
+
+
+def _apply_publish_environment(publish: dict, env: Mapping[str, str], applied: list[str], take) -> None:
+    take(publish, "tiktok_client_key", ("TIKTOK_CLIENT_KEY",))
+    take(publish, "tiktok_client_secret", ("TIKTOK_CLIENT_SECRET",))
+    take(publish, "tiktok_redirect_uri", ("TIKTOK_REDIRECT_URI",))
+    take(publish, "tiktok_audited", ("TIKTOK_AUDITED",), _bool)
+    take(publish, "tiktok_default_mode", ("TIKTOK_POST_MODE",))
+    take(publish, "tiktok_daily_posts", ("TIKTOK_DAILY_POSTS_PER_ACCOUNT",), _int)
+    take(publish, "youtube_redirect_uri", ("YOUTUBE_REDIRECT_URI",))
+    take(publish, "stagger_seconds", ("PUBLISH_STAGGER_SECONDS",), _int)
+    take(publish, "max_concurrent_jobs", ("PUBLISH_MAX_CONCURRENT_JOBS",), _int)
+    take(publish, "vary_copy", ("PUBLISH_VARY_COPY",), _bool)
+    take(publish, "public_base_url", ("PUBLIC_BASE_URL",))
+
+    projects = _youtube_projects_from_env(env)
+    if projects is not None:
+        publish["youtube_projects"] = projects
+        if env.get("YOUTUBE_CLIENT_ID", "").strip() or env.get("YOUTUBE_CLIENT_SECRET", "").strip():
+            applied.append("YOUTUBE_CLIENT_ID")
+        if env.get("YOUTUBE_PROJECTS", "").strip():
+            applied.append("YOUTUBE_PROJECTS")
+        if env.get("YOUTUBE_DAILY_UPLOAD_QUOTA", "").strip():
+            applied.append("YOUTUBE_DAILY_UPLOAD_QUOTA")
+
+
+def _youtube_projects_from_env(env: Mapping[str, str]) -> list[dict] | None:
+    client_id = env.get("YOUTUBE_CLIENT_ID", "").strip()
+    client_secret = env.get("YOUTUBE_CLIENT_SECRET", "").strip()
+    extra = env.get("YOUTUBE_PROJECTS", "").strip()
+    quota_raw = env.get("YOUTUBE_DAILY_UPLOAD_QUOTA", "").strip()
+    if not client_id and not client_secret and not extra:
+        return None
+    quota = _int(quota_raw) if quota_raw else 6
+    projects = [
+        {
+            "id": "default",
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "daily_upload_quota": max(1, quota),
+        }
+    ]
+    for slug in _csv(extra):
+        project_id = slug.strip().lower()
+        if not project_id or project_id == "default":
+            continue
+        if not project_id.replace("-", "").isalnum() or not project_id[0].isalpha():
+            raise ValueError(
+                "YOUTUBE_PROJECTS entries must be short slugs such as studio-b, "
+                f"got {slug!r}"
+            )
+        prefix = "YOUTUBE_" + project_id.upper().replace("-", "_") + "_"
+        project_quota = env.get(prefix + "DAILY_UPLOAD_QUOTA", "").strip()
+        projects.append(
+            {
+                "id": project_id,
+                "client_id": env.get(prefix + "CLIENT_ID", "").strip(),
+                "client_secret": env.get(prefix + "CLIENT_SECRET", "").strip(),
+                "daily_upload_quota": _int(project_quota) if project_quota else quota,
+            }
+        )
+    return projects

@@ -92,7 +92,7 @@ def _download_url(settings, task_id: str) -> str | None:
     return f"{settings.public_base_url}/api/v1/media/{task_id}?access={token}"
 
 
-async def _deliver(bot, chat_id: int, task_id: str, snapshot: dict) -> None:
+async def _deliver(bot, chat_id: int, task_id: str, snapshot: dict, user_id: int | None = None) -> None:
     settings = load_telegram_settings()
     link = _download_url(settings, task_id)
     files = [item for item in snapshot.get("files") or [] if isinstance(item, str)]
@@ -198,6 +198,11 @@ async def _deliver(bot, chat_id: int, task_id: str, snapshot: dict) -> None:
     finally:
         if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
+    if user_id is not None:
+        offer = get_conversation().publish_flow.offer(user_id, task_id)
+        await bot.send_message(chat_id, offer.text, reply_markup=_markup(offer.buttons))
+        if offer.watch_publish_ids:
+            asyncio.create_task(_watch_publish(bot, chat_id, user_id, offer.watch_publish_ids))
 
 
 async def _watch(bot, chat_id: int, message_id: int, user_id: int, task_id: str, topic: str) -> None:
@@ -231,7 +236,33 @@ async def _watch(bot, chat_id: int, message_id: int, user_id: int, task_id: str,
         return
 
     if int(snapshot.get("state") or 0) == 1:
-        await _deliver(bot, chat_id, task_id, snapshot)
+        await _deliver(bot, chat_id, task_id, snapshot, user_id)
+
+
+async def _watch_publish(bot, chat_id: int, user_id: int, job_ids: list[str]) -> None:
+    from app.telegram.publish_flow import describe_job
+
+    settings = load_telegram_settings()
+    publisher = getattr(get_conversation(), "publisher", None)
+    if publisher is None:
+        return
+    pending = set(job_ids)
+    deadline = asyncio.get_running_loop().time() + settings.task_timeout_seconds
+    while pending and asyncio.get_running_loop().time() < deadline:
+        await asyncio.sleep(settings.poll_interval_seconds)
+        for job_id in list(pending):
+            try:
+                job = await asyncio.to_thread(publisher.job, f"tg:{user_id}", job_id)
+            except Exception as exc:
+                pending.discard(job_id)
+                await bot.send_message(chat_id, f"Could not read a publish job.\n{exc}")
+                continue
+            if not job or job.get("state") in {"complete", "failed"}:
+                pending.discard(job_id)
+                if job:
+                    await bot.send_message(chat_id, describe_job(job))
+    if pending:
+        await bot.send_message(chat_id, "Some publish jobs are still running. Use /accounts to review them.")
 
 
 def build_application(token: str):
@@ -273,6 +304,13 @@ def build_application(token: str):
         reply = get_conversation().on_settings(user_id, _chat_type(update))
         await _send(update, reply)
 
+    async def accounts(update, context):
+        user_id = _user_id(update)
+        if user_id is None:
+            return
+        reply = get_conversation().publish_flow.on_accounts(user_id, _chat_type(update))
+        await _send(update, reply)
+
     async def status(update, context):
         user_id = _user_id(update)
         if user_id is None:
@@ -286,6 +324,15 @@ def build_application(token: str):
             return
         reply = get_conversation().on_text(user_id, update.message.text or "", _chat_type(update))
         sent = await _send(update, reply)
+        if reply.watch_publish_ids and update.effective_chat is not None:
+            asyncio.create_task(
+                _watch_publish(
+                    context.bot,
+                    update.effective_chat.id,
+                    user_id,
+                    reply.watch_publish_ids,
+                )
+            )
         if reply.watch_task_id and sent is not None:
             session = get_conversation().sessions.get(user_id, {})
             asyncio.create_task(
@@ -307,6 +354,15 @@ def build_application(token: str):
         await query.answer()
         reply = get_conversation().on_callback(user_id, query.data or "", _chat_type(update))
         sent = await _send(update, reply)
+        if reply.watch_publish_ids and update.effective_chat is not None:
+            asyncio.create_task(
+                _watch_publish(
+                    context.bot,
+                    update.effective_chat.id,
+                    user_id,
+                    reply.watch_publish_ids,
+                )
+            )
         if reply.watch_task_id:
             message = sent or query.message
             message_id = getattr(message, "message_id", None)
@@ -328,6 +384,7 @@ def build_application(token: str):
     application.add_handler(CommandHandler("new", new))
     application.add_handler(CommandHandler("settings", settings_command))
     application.add_handler(CommandHandler("status", status))
+    application.add_handler(CommandHandler("accounts", accounts))
     application.add_handler(CallbackQueryHandler(callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text))
     return application

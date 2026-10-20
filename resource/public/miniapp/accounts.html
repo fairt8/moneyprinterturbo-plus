@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Publishing accounts</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    :root {
+      --ink: #1c1915; --muted: #6d645b; --paper: #f6f1e8; --card: #fffaf3;
+      --line: #e4d9c8; --copper: #b8612d; --bad: #8d2f2f; --good: #2f6b4f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: Georgia, "Iowan Old Style", serif; color: var(--ink);
+      background: linear-gradient(180deg, #fbf7f1 0%, var(--paper) 100%);
+    }
+    main { width: min(760px, calc(100% - 24px)); margin: 0 auto; padding: 28px 0 72px; }
+    h1 { font-size: clamp(2rem, 6vw, 3rem); line-height: 0.95; margin: 0 0 8px; }
+    a { color: #8d4318; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 22px; padding: 18px; margin-top: 16px; }
+    label { display: block; margin: 12px 0 6px; }
+    input, select { width: 100%; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; font: inherit; }
+    button, .linkish {
+      border: 0; border-radius: 999px; padding: 10px 14px; font: inherit; cursor: pointer; background: var(--copper); color: white;
+    }
+    .ghost { background: #f3eadf; color: var(--ink); }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .account { border-top: 1px solid var(--line); padding: 12px 0; }
+    .banner { border-radius: 14px; padding: 12px 14px; margin-top: 12px; }
+    .warn { background: #fff1d6; }
+    .error { background: #f8e6e2; color: var(--bad); }
+    .info { background: #e7f0ea; color: var(--good); }
+    .check { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+    .check input { width: auto; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Accounts</h1>
+      <p>Link as many YouTube channels and TikTok accounts as you need. Each one keeps its own login.</p>
+      <p><a href="/miniapp">Back to the video creator</a></p>
+    </header>
+    <section id="auth" class="card hidden">
+      <strong>This studio is locked.</strong>
+      <label for="secret">Password or API key</label>
+      <input id="secret" type="password" />
+      <div class="row"><button id="unlock" type="button">Unlock</button></div>
+    </section>
+    <section id="studio" class="card">
+      <div id="notice" class="banner warn">Loading accounts…</div>
+      <div id="quota"></div>
+      <div id="list"></div>
+      <h2>Link an account</h2>
+      <label for="label">Label</label>
+      <input id="label" placeholder="Travel channel" />
+      <label for="project">YouTube Cloud project</label>
+      <select id="project"></select>
+      <div class="row">
+        <button id="link-youtube" type="button">Link YouTube</button>
+        <button id="link-tiktok" type="button">Link TikTok</button>
+      </div>
+      <h2>Publish target</h2>
+      <p>A target is a named set of accounts. Auto-publish uses the default target.</p>
+      <label for="target-name">Name</label>
+      <input id="target-name" placeholder="Nightly shorts" />
+      <div id="target-picks"></div>
+      <label class="check"><input id="target-default" type="checkbox" /> Make this the default target</label>
+      <div class="row"><button id="save-target" type="button">Save target</button></div>
+      <div id="targets"></div>
+    </section>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const state = { accounts: [], projects: [{ id: "default" }] };
+
+    function initData() {
+      try { return window.Telegram && Telegram.WebApp && Telegram.WebApp.initData || ""; }
+      catch (error) { return ""; }
+    }
+    function headers() {
+      const result = { "Content-Type": "application/json" };
+      const init = initData();
+      if (init) result["X-Telegram-Init-Data"] = init;
+      const secret = sessionStorage.getItem("mpt.secret") || "";
+      if (secret) {
+        result["X-Web-Password"] = secret;
+        result["X-API-Key"] = secret;
+      }
+      return result;
+    }
+    function note(text, kind) {
+      const node = $("notice");
+      node.textContent = text;
+      node.className = "banner " + (kind || "warn");
+    }
+    async function load() {
+      const response = await fetch("/api/v1/publish/setup", { headers: headers() });
+      const body = await response.json().catch(() => ({}));
+      if (response.status === 401) {
+        $("auth").classList.remove("hidden");
+        $("studio").classList.add("hidden");
+        return;
+      }
+      if (!response.ok) {
+        note(body.message || "Could not load accounts.", "error");
+        return;
+      }
+      const data = body.data || {};
+      state.accounts = data.accounts || [];
+      state.projects = data.projects && data.projects.length ? data.projects : [{ id: "default" }];
+      const project = $("project");
+      project.replaceChildren();
+      state.projects.forEach((item) => {
+        const option = document.createElement("option");
+        option.value = item.id;
+        option.textContent = item.id + " · " + item.daily_upload_quota + " uploads/day";
+        project.appendChild(option);
+      });
+      const parts = [];
+      if (!data.youtube_configured) parts.push("YouTube client id is not set.");
+      if (!data.tiktok_configured) parts.push("TikTok client key is not set.");
+      if (data.youtube_redirect_uri) parts.push("YouTube redirect: " + data.youtube_redirect_uri);
+      if (data.tiktok_redirect_uri) parts.push("TikTok redirect: " + data.tiktok_redirect_uri);
+      if (!data.tiktok_audited) parts.push("TikTok is unaudited, so direct posts stay private until the app is approved.");
+      note(parts.join(" ") || "Ready to link accounts.", parts.length ? "warn" : "info");
+      const quota = data.quota || {};
+      const quotaBits = [];
+      (quota.youtube || []).forEach((item) => quotaBits.push("YouTube " + item.project_id + ": " + item.used + "/" + item.limit));
+      (quota.tiktok || []).forEach((item) => quotaBits.push("TikTok " + item.label + ": " + item.used + "/" + item.limit));
+      $("quota").textContent = quotaBits.join(" · ");
+      renderAccounts();
+      renderTargets(data.targets || []);
+    }
+    function renderAccounts() {
+      const list = $("list");
+      list.replaceChildren();
+      const picks = $("target-picks");
+      picks.replaceChildren();
+      if (!state.accounts.length) {
+        const empty = document.createElement("p");
+        empty.textContent = "No channels or TikTok accounts yet.";
+        list.appendChild(empty);
+        return;
+      }
+      state.accounts.forEach((account) => {
+        const block = document.createElement("div");
+        block.className = "account";
+        const title = document.createElement("strong");
+        title.textContent = account.platform + " · " + account.label;
+        const meta = document.createElement("p");
+        meta.textContent = (account.display_name || account.external_id || "") +
+          (account.project_id ? " · project " + account.project_id : "") +
+          (account.needs_reauth ? " · needs a new login" : "");
+        const actions = document.createElement("div");
+        actions.className = "row";
+        actions.append(
+          action("Rename", () => rename(account)),
+          action("Re-authorize", () => connect(account.platform, account.label, account.project_id, account.id), "ghost"),
+          action("Unlink", () => unlink(account), "ghost")
+        );
+        block.append(title, meta, actions);
+        list.appendChild(block);
+        const choice = document.createElement("label");
+        choice.className = "check";
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.value = account.id;
+        box.className = "target-account";
+        choice.append(box, document.createTextNode(" " + account.label));
+        picks.appendChild(choice);
+      });
+    }
+    function renderTargets(targets) {
+      const node = $("targets");
+      node.replaceChildren();
+      targets.forEach((target) => {
+        const row = document.createElement("div");
+        row.className = "account";
+        const text = document.createElement("p");
+        text.textContent = target.name + (target.is_default ? " (default)" : "") + " · " + (target.account_ids || []).length + " accounts";
+        const actions = document.createElement("div");
+        actions.className = "row";
+        actions.append(
+          action("Make default", () => makeDefault(target.id), "ghost"),
+          action("Delete", () => removeTarget(target.id), "ghost")
+        );
+        row.append(text, actions);
+        node.appendChild(row);
+      });
+    }
+    function action(text, onClick, kind) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = text;
+      if (kind) button.className = kind;
+      button.addEventListener("click", onClick);
+      return button;
+    }
+    async function connect(platform, label, project, accountId) {
+      const response = await fetch("/api/v1/publish/connect", {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({ platform, label: label || "", project_id: project || "default", account_id: accountId || "" }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        note(body.message || "Could not start authorization.", "error");
+        return;
+      }
+      window.location.href = body.data.url;
+    }
+    async function rename(account) {
+      const label = window.prompt("New label", account.label);
+      if (!label) return;
+      const response = await fetch("/api/v1/publish/accounts/" + encodeURIComponent(account.id), {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({ label }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) note(body.message || "Could not rename.", "error");
+      else load();
+    }
+    async function unlink(account) {
+      if (!window.confirm("Unlink " + account.label + "?")) return;
+      const response = await fetch("/api/v1/publish/accounts/" + encodeURIComponent(account.id), {
+        method: "DELETE",
+        headers: headers(),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        note(body.message || "Could not unlink.", "error");
+        return;
+      }
+      load();
+    }
+    async function makeDefault(id) {
+      await fetch("/api/v1/publish/targets/" + encodeURIComponent(id) + "/default", { method: "POST", headers: headers(), body: "{}" });
+      load();
+    }
+    async function removeTarget(id) {
+      await fetch("/api/v1/publish/targets/" + encodeURIComponent(id), { method: "DELETE", headers: headers() });
+      load();
+    }
+    $("unlock").addEventListener("click", () => {
+      sessionStorage.setItem("mpt.secret", $("secret").value.trim());
+      $("auth").classList.add("hidden");
+      $("studio").classList.remove("hidden");
+      load();
+    });
+    $("link-youtube").addEventListener("click", () => connect("youtube", $("label").value.trim(), $("project").value, ""));
+    $("link-tiktok").addEventListener("click", () => connect("tiktok", $("label").value.trim(), "default", ""));
+    $("save-target").addEventListener("click", async () => {
+      const accountIds = Array.from(document.querySelectorAll(".target-account")).filter((node) => node.checked).map((node) => node.value);
+      const response = await fetch("/api/v1/publish/targets", {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({ name: $("target-name").value.trim(), account_ids: accountIds, is_default: $("target-default").checked }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) note(body.message || "Could not save the target.", "error");
+      else load();
+    });
+    try { if (window.Telegram && Telegram.WebApp) { Telegram.WebApp.ready(); Telegram.WebApp.expand(); } } catch (error) {}
+    load().catch(() => note("The accounts page could not reach the API.", "error"));
+  </script>
+</body>
+</html>

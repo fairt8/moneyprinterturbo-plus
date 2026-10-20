@@ -1,0 +1,106 @@
+# API, Streamlit WebUI, and Telegram bot.
+# Copy config.example.toml to config.toml and .env.example to .env first.
+# Compose reads .env for the ${VAR:-} substitutions below.
+
+x-app-env: &app-env
+  TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+  TELEGRAM_MODE: ${TELEGRAM_MODE:-polling}
+  TELEGRAM_WEBHOOK_URL: ${TELEGRAM_WEBHOOK_URL:-}
+  TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+  TELEGRAM_ALLOWED_USER_IDS: ${TELEGRAM_ALLOWED_USER_IDS:-}
+  TELEGRAM_RATE_LIMIT_PER_HOUR: ${TELEGRAM_RATE_LIMIT_PER_HOUR:-5}
+  TELEGRAM_PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+  PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+  WEB_PASSWORD: ${WEB_PASSWORD:-}
+  MEDIA_TOKEN_SECRET: ${MEDIA_TOKEN_SECRET:-}
+  TELEGRAM_SERVICE_SECRET: ${TELEGRAM_SERVICE_SECRET:-}
+  API_KEY: ${API_KEY:-}
+  LLM_PROVIDER: ${LLM_PROVIDER:-}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+  OPENAI_MODEL_NAME: ${OPENAI_MODEL_NAME:-}
+  MOONSHOT_API_KEY: ${MOONSHOT_API_KEY:-}
+  DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+  GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+  GROQ_API_KEY: ${GROQ_API_KEY:-}
+  VIDEO_SOURCE: ${VIDEO_SOURCE:-pexels}
+  PEXELS_API_KEYS: ${PEXELS_API_KEYS:-}
+  PIXABAY_API_KEYS: ${PIXABAY_API_KEYS:-}
+  FFMPEG_PATH: ${FFMPEG_PATH:-}
+  IMAGEMAGICK_PATH: ${IMAGEMAGICK_PATH:-}
+  TASK_RETENTION_HOURS: ${TASK_RETENTION_HOURS:-72}
+  MAX_CONCURRENT_TASKS: ${MAX_CONCURRENT_TASKS:-2}
+
+x-app-volumes: &app-volumes
+  - ./config.toml:/MoneyPrinterTurbo/config.toml
+  - ./storage:/MoneyPrinterTurbo/storage
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        DOCKER_BUILD_MIRROR: default
+        PIP_USE_OFFICIAL: "1"
+    image: moneyprinterturbo:local
+    container_name: moneyprinterturbo-api
+    command: ["python3", "main.py"]
+    environment:
+      <<: *app-env
+    volumes: *app-volumes
+    ports:
+      - "127.0.0.1:8080:8080"
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/ping', timeout=5)",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  webui:
+    image: moneyprinterturbo:local
+    container_name: moneyprinterturbo-webui
+    command:
+      [
+        "streamlit",
+        "run",
+        "./webui/Main.py",
+        "--server.address=0.0.0.0",
+        "--server.port=8501",
+        "--browser.serverAddress=127.0.0.1",
+        "--server.enableCORS=True",
+        "--browser.gatherUsageStats=False",
+        "--client.toolbarMode=minimal",
+        "--logger.hideWelcomeMessage=True",
+        "--server.showEmailPrompt=False",
+      ]
+    environment:
+      <<: *app-env
+    volumes: *app-volumes
+    ports:
+      - "127.0.0.1:8501:8501"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  bot:
+    image: moneyprinterturbo:local
+    container_name: moneyprinterturbo-bot
+    command: ["python3", "-m", "app.telegram"]
+    environment:
+      <<: *app-env
+      MPT_API_BASE_URL: http://api:8080
+    volumes: *app-volumes
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped

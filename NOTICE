@@ -1,0 +1,11 @@
+MoneyPrinterTurbo fork
+
+This repository includes MoneyPrinterTurbo, originally written by Harry and
+published at https://github.com/harry0703/MoneyPrinterTurbo under the MIT
+license. The upstream commit imported here is:
+
+    90f77011d7e3b46d382e6d0180dabfb6725ffee4
+
+The MIT license in the LICENSE file applies to the upstream code and to the
+Telegram, Mini App, and reliability changes added in this fork. Keep that
+copyright notice with any copy or substantial portion of the software.

@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Make a short video</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    :root {
+      --ink: #1c1915;
+      --muted: #6d645b;
+      --paper: #f6f1e8;
+      --card: #fffaf3;
+      --line: #e4d9c8;
+      --copper: #b8612d;
+      --copper-dark: #8d4318;
+      --good: #2f6b4f;
+      --bad: #8d2f2f;
+      --shadow: 0 16px 40px rgba(60, 40, 20, 0.08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+      color: var(--ink);
+      background:
+        radial-gradient(1200px 500px at 10% -10%, #f3d7bf 0%, transparent 55%),
+        linear-gradient(180deg, #fbf7f1 0%, var(--paper) 40%, #efe4d4 100%);
+    }
+    main {
+      width: min(720px, calc(100% - 28px));
+      margin: 0 auto;
+      padding: 28px 0 64px;
+    }
+    header h1 {
+      font-size: clamp(2rem, 6vw, 3.2rem);
+      line-height: 0.95;
+      letter-spacing: -0.03em;
+      margin: 0 0 8px;
+    }
+    header p { margin: 0; color: var(--muted); font-size: 1.05rem; }
+    .credit { margin-top: 10px; font-size: 0.85rem; color: var(--muted); }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      box-shadow: var(--shadow);
+      padding: 18px;
+      margin-top: 18px;
+    }
+    label { display: block; font-size: 0.92rem; margin: 14px 0 6px; }
+    textarea, input, select {
+      width: 100%;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+      border-radius: 14px;
+      padding: 12px 14px;
+      font: inherit;
+      font-size: 1rem;
+    }
+    textarea { min-height: 110px; resize: vertical; }
+    .segments { display: flex; gap: 8px; flex-wrap: wrap; }
+    .segments button, .primary, .ghost {
+      border: 0;
+      border-radius: 999px;
+      padding: 10px 14px;
+      font: inherit;
+      cursor: pointer;
+    }
+    .segments button {
+      background: #f3eadf;
+      color: var(--ink);
+    }
+    .segments button[aria-pressed="true"] {
+      background: var(--ink);
+      color: #fffaf3;
+    }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .check { display: flex; align-items: center; gap: 10px; margin-top: 16px; }
+    .check input { width: auto; }
+    .primary {
+      width: 100%;
+      margin-top: 18px;
+      background: var(--copper);
+      color: white;
+      font-size: 1.05rem;
+      padding: 14px 16px;
+    }
+    .primary:disabled { opacity: 0.55; cursor: progress; }
+    .ghost { background: transparent; color: var(--copper-dark); padding-left: 0; }
+    .banner {
+      border-radius: 14px;
+      padding: 12px 14px;
+      margin-top: 12px;
+    }
+    .banner.error { background: #f8e6e2; color: var(--bad); }
+    .banner.info { background: #e7f0ea; color: var(--good); }
+    .banner.warn { background: #fff1d6; color: #7a5414; }
+    .hidden { display: none; }
+    progress { width: 100%; height: 12px; accent-color: var(--copper); }
+    video { width: 100%; border-radius: 16px; background: #111; margin-top: 12px; }
+    a.download {
+      display: inline-block;
+      margin-top: 12px;
+      color: var(--copper-dark);
+      font-weight: 700;
+    }
+    @media (max-width: 640px) {
+      .row { grid-template-columns: 1fr; }
+      main { width: min(720px, calc(100% - 20px)); }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Make a short video.</h1>
+      <p>Give it a topic. The script, voice, stock footage, and subtitles are assembled for you.</p>
+      <p class="credit">A Telegram and web front end for MoneyPrinterTurbo by Harry, MIT license.</p>
+    </header>
+
+    <section id="auth" class="card hidden">
+      <strong>This studio is locked.</strong>
+      <p>Enter the web password or API key from the server config.</p>
+      <label for="secret">Password or API key</label>
+      <input id="secret" type="password" autocomplete="current-password" />
+      <button class="primary" id="unlock" type="button">Unlock</button>
+    </section>
+
+    <section id="composer" class="card">
+      <div id="local-note" class="banner warn hidden">No password is configured. Anyone who can open this page can start a video. Set WEB_PASSWORD or API_KEY before sharing it.</div>
+      <label for="topic">Topic</label>
+      <textarea id="topic" maxlength="500" placeholder="A rainy evening in a bookstore, told like a quiet advertisement."></textarea>
+      <label>Frame</label>
+      <div class="segments" id="aspects"></div>
+      <div class="row">
+        <div>
+          <label for="voice">Voice</label>
+          <select id="voice"></select>
+        </div>
+        <div>
+          <label for="language">Language</label>
+          <select id="language"></select>
+        </div>
+      </div>
+      <label for="custom-voice">Or type an Edge voice name</label>
+      <input id="custom-voice" placeholder="en-US-JennyNeural" />
+      <label for="paragraphs">Script length: <span id="paragraph-label">1 paragraph</span></label>
+      <input id="paragraphs" type="range" min="1" max="4" value="1" />
+      <label class="check"><input id="subtitles" type="checkbox" checked /> Burn subtitles into the video</label>
+      <button class="primary" id="generate" type="button">Generate video</button>
+      <div id="message" class="banner hidden"></div>
+    </section>
+
+    <section id="progress-card" class="card hidden">
+      <strong id="stage">Writing the script</strong>
+      <p id="progress-copy"></p>
+      <progress id="bar" max="100" value="0"></progress>
+      <video id="player" class="hidden" controls playsinline></video>
+      <a id="download" class="download hidden" href="#">Download the video</a>
+      <button class="ghost" id="again" type="button">Make another</button>
+    </section>
+  </main>
+  <script>
+    const state = {
+      aspect: "9:16",
+      authRequired: false,
+      taskId: "",
+      timer: null,
+    };
+
+    const $ = (id) => document.getElementById(id);
+
+    function telegramInitData() {
+      try {
+        return window.Telegram && Telegram.WebApp && Telegram.WebApp.initData || "";
+      } catch (error) {
+        return "";
+      }
+    }
+
+    function secret() {
+      return sessionStorage.getItem("mpt.secret") || "";
+    }
+
+    function headers() {
+      const result = { "Content-Type": "application/json" };
+      const initData = telegramInitData();
+      if (initData) result["X-Telegram-Init-Data"] = initData;
+      const value = secret();
+      if (value) {
+        result["X-Web-Password"] = value;
+        result["X-API-Key"] = value;
+      }
+      return result;
+    }
+
+    function showMessage(text, kind) {
+      const node = $("message");
+      node.textContent = text;
+      node.className = "banner " + (kind || "info");
+    }
+
+    function clearMessage() {
+      $("message").className = "banner hidden";
+      $("message").textContent = "";
+    }
+
+    function fillSelect(select, options, selected) {
+      select.replaceChildren();
+      options.forEach((option) => {
+        const node = document.createElement("option");
+        node.value = option.value;
+        node.textContent = option.label;
+        node.selected = option.value === selected;
+        select.appendChild(node);
+      });
+    }
+
+    function renderAspects(aspects, selected) {
+      const box = $("aspects");
+      box.replaceChildren();
+      aspects.forEach((aspect) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = aspect.label;
+        button.setAttribute("aria-pressed", String(aspect.value === selected));
+        button.addEventListener("click", () => {
+          state.aspect = aspect.value;
+          renderAspects(aspects, aspect.value);
+        });
+        box.appendChild(button);
+      });
+      state.aspect = selected;
+    }
+
+    function applyBootstrap(data) {
+      state.authRequired = Boolean(data.auth_required);
+      const defaults = data.defaults || {};
+      renderAspects(data.aspects || [], defaults.video_aspect || "9:16");
+      fillSelect($("voice"), data.voices || [], defaults.voice_name || "");
+      fillSelect($("language"), data.languages || [], defaults.video_language || "");
+      $("paragraphs").value = String(defaults.paragraph_number || 1);
+      $("subtitles").checked = defaults.subtitle_enabled !== false;
+      updateParagraphLabel();
+      const insideTelegram = Boolean(telegramInitData());
+      const unlocked = !state.authRequired || insideTelegram || Boolean(secret());
+      $("auth").classList.toggle("hidden", unlocked);
+      $("composer").classList.toggle("hidden", !unlocked);
+      $("local-note").classList.toggle("hidden", state.authRequired || insideTelegram);
+    }
+
+    function updateParagraphLabel() {
+      const count = Number($("paragraphs").value || 1);
+      $("paragraph-label").textContent = count === 1 ? "1 paragraph" : count + " paragraphs";
+    }
+
+    async function loadBootstrap() {
+      const response = await fetch("/api/v1/miniapp/bootstrap");
+      if (!response.ok) throw new Error("The form could not be loaded.");
+      const body = await response.json();
+      applyBootstrap(body.data || {});
+    }
+
+    function voiceName() {
+      const custom = $("custom-voice").value.trim();
+      return custom || $("voice").value;
+    }
+
+    async function generate() {
+      clearMessage();
+      const topic = $("topic").value.trim();
+      if (topic.length < 2) {
+        showMessage("Write a topic first. A sentence is plenty.", "error");
+        return;
+      }
+      $("generate").disabled = true;
+      $("generate").textContent = "Queuing…";
+      try {
+        const response = await fetch("/api/v1/miniapp/videos", {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify({
+            video_subject: topic,
+            video_aspect: state.aspect,
+            voice_name: voiceName(),
+            paragraph_number: Number($("paragraphs").value || 1),
+            video_language: $("language").value,
+            subtitle_enabled: $("subtitles").checked,
+          }),
+        });
+        const body = await response.json().catch(() => ({}));
+        if (response.status === 401) {
+          sessionStorage.removeItem("mpt.secret");
+          $("auth").classList.remove("hidden");
+          $("composer").classList.add("hidden");
+          showMessage(body.message || "Sign in to continue.", "error");
+          return;
+        }
+        if (!response.ok) {
+          showMessage(body.message || "The video could not be queued.", "error");
+          return;
+        }
+        state.taskId = body.data.task_id;
+        $("progress-card").classList.remove("hidden");
+        $("player").classList.add("hidden");
+        $("download").classList.add("hidden");
+        poll();
+      } catch (error) {
+        showMessage("The server did not respond. Check that the API is running.", "error");
+      } finally {
+        $("generate").disabled = false;
+        $("generate").textContent = "Generate video";
+      }
+    }
+
+    async function poll() {
+      if (state.timer) clearTimeout(state.timer);
+      try {
+        const response = await fetch("/api/v1/miniapp/tasks/" + encodeURIComponent(state.taskId), {
+          headers: headers(),
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          showMessage(body.message || "Could not read progress.", "error");
+          return;
+        }
+        const data = body.data || {};
+        $("stage").textContent = data.stage || "Working";
+        $("bar").value = Number(data.progress || 0);
+        $("progress-copy").textContent = (data.stage || "Working") + " · " + Number(data.progress || 0) + "%";
+        if (data.state === -1) {
+          showMessage(data.error || "The video failed.", "error");
+          return;
+        }
+        if (data.state === 1 && data.download_url) {
+          $("progress-copy").textContent = "Ready to watch.";
+          const player = $("player");
+          player.src = data.download_url;
+          player.classList.remove("hidden");
+          const link = $("download");
+          link.href = data.download_url;
+          link.classList.remove("hidden");
+          showMessage("The video is ready.", "info");
+          return;
+        }
+      } catch (error) {
+        showMessage("Lost contact with the server. Trying again…", "error");
+      }
+      state.timer = setTimeout(poll, 3000);
+    }
+
+    $("paragraphs").addEventListener("input", updateParagraphLabel);
+    $("generate").addEventListener("click", generate);
+    $("unlock").addEventListener("click", () => {
+      const value = $("secret").value.trim();
+      if (!value) return;
+      sessionStorage.setItem("mpt.secret", value);
+      $("auth").classList.add("hidden");
+      $("composer").classList.remove("hidden");
+    });
+    $("again").addEventListener("click", () => {
+      if (state.timer) clearTimeout(state.timer);
+      $("progress-card").classList.add("hidden");
+      clearMessage();
+      $("topic").focus();
+    });
+
+    try {
+      if (window.Telegram && Telegram.WebApp) {
+        Telegram.WebApp.ready();
+        Telegram.WebApp.expand();
+      }
+    } catch (error) {}
+
+    loadBootstrap().catch(() => {
+      showMessage("The form could not be loaded from the API.", "error");
+    });
+  </script>
+</body>
+</html>

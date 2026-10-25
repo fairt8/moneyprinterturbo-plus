@@ -169,3 +169,21 @@ def configure_terminal_logger(sink, level: str, colorize: bool = True) -> int:
             colorize=colorize,
         )
         return _terminal_handler_id
+
+
+def configure_rotating_file_logger(path: str) -> None:
+    """Write a size-capped log file. Docker's json-file driver caps container logs separately."""
+
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    logger.add(
+        path,
+        level=0,
+        filter=runtime_log_filter,
+        format=format_log_record,
+        rotation="10 MB",
+        retention=3,
+        enqueue=True,
+        colorize=False,
+    )

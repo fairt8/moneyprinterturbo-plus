@@ -203,6 +203,12 @@ async def _deliver(bot, chat_id: int, task_id: str, snapshot: dict, user_id: int
         await bot.send_message(chat_id, offer.text, reply_markup=_markup(offer.buttons))
         if offer.watch_publish_ids:
             asyncio.create_task(_watch_publish(bot, chat_id, user_id, offer.watch_publish_ids))
+    try:
+        from app.services.storage_hygiene import release_task_after_delivery
+
+        release_task_after_delivery(task_id)
+    except Exception as exc:
+        logger.warning(f"could not apply delete-after-delivery for {task_id}: {exc}")
 
 
 async def _watch(bot, chat_id: int, message_id: int, user_id: int, task_id: str, topic: str) -> None:
@@ -311,6 +317,15 @@ def build_application(token: str):
         reply = get_conversation().publish_flow.on_accounts(user_id, _chat_type(update))
         await _send(update, reply)
 
+    async def storage(update, context):
+        user_id = _user_id(update)
+        if user_id is None or update.message is None:
+            return
+        parts = (update.message.text or "").split(maxsplit=1)
+        argument = parts[1] if len(parts) > 1 else ""
+        reply = get_conversation().on_storage(user_id, argument, _chat_type(update))
+        await _send(update, reply)
+
     async def status(update, context):
         user_id = _user_id(update)
         if user_id is None:
@@ -385,6 +400,7 @@ def build_application(token: str):
     application.add_handler(CommandHandler("settings", settings_command))
     application.add_handler(CommandHandler("status", status))
     application.add_handler(CommandHandler("accounts", accounts))
+    application.add_handler(CommandHandler("storage", storage))
     application.add_handler(CallbackQueryHandler(callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text))
     return application

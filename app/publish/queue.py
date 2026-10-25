@@ -74,6 +74,13 @@ def run_job(job_id: str) -> dict:
         logger.exception(f"publish job {job_id} failed")
         _retry_or_fail(store, settings, job, f"Unexpected publish error: {exc}")
     latest = store.job_secret(job_id) or job
+    if latest.get("state") == "complete":
+        try:
+            from app.services.storage_hygiene import release_task_after_publish
+
+            release_task_after_publish(str(latest.get("task_id") or ""))
+        except Exception as exc:
+            logger.warning(f"could not apply delete-after-publish for {job_id}: {exc}")
     return store.public_job(latest)
 
 

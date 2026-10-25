@@ -94,6 +94,9 @@ def dispatch_update(update: dict, conversation: Conversation, sender: Sender) ->
         reply = conversation.on_status(user_id, chat_type)
     elif command == "accounts":
         reply = conversation.publish_flow.on_accounts(user_id, chat_type)
+    elif command == "storage":
+        argument = text.split(maxsplit=1)[1] if len(text.split(maxsplit=1)) > 1 else ""
+        reply = conversation.on_storage(user_id, argument, chat_type)
     elif text.startswith("/"):
         reply = Reply("Unknown command. Use /help to see what I understand.")
     else:

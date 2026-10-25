@@ -1,0 +1,55 @@
+# Render blueprint for the API, Mini App, and webhook-mode Telegram bot.
+#
+# A free Render web service sleeps when idle and has about 512 MB of RAM.
+# That is too small to render a video: the encode is killed and the disk is
+# not persistent. Use a paid instance with at least 2 GB of RAM, and keep the
+# disk below. The same retention limits as the Oracle stack apply.
+services:
+  - type: web
+    name: moneyprinterturbo
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerCommand: python3 main.py
+    healthCheckPath: /ping
+    envVars:
+      - key: TELEGRAM_MODE
+        value: webhook
+      - key: MAX_CONCURRENT_TASKS
+        value: "1"
+      - key: MPT_LOW_MEMORY
+        value: "true"
+      - key: TASK_RETENTION_HOURS
+        value: "24"
+      - key: MATERIAL_CACHE_MAX_MB
+        value: "256"
+      - key: STORAGE_CAP_MB
+        value: "1024"
+      - key: DELETE_AFTER_DELIVERY
+        value: "true"
+      - key: MPT_LOG_FILE
+        value: /MoneyPrinterTurbo/storage/logs/server.log
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_WEBHOOK_URL
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_BASE_URL
+        sync: false
+      - key: LLM_MODEL
+        sync: false
+      - key: API_KEY
+        sync: false
+      - key: WEB_PASSWORD
+        sync: false
+      - key: PEXELS_API_KEYS
+        sync: false
+    disk:
+      name: mpt-data
+      mountPath: /MoneyPrinterTurbo/storage
+      sizeGB: 2

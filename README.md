@@ -11,6 +11,72 @@ You give the app a topic. It asks a language model for a script and search terms
 
 The Chinese upstream README is kept at `docs/upstream-README.zh.md`. The English upstream README is `README-en.md`.
 
+## Deploy on Oracle + Cloudflare
+
+This is the path for a small shared Oracle Cloud VM (Always Free Ampere ARM64, or x86). The image is `linux/arm64` and `linux/amd64`. Nothing is published on `0.0.0.0`. Cloudflare carries HTTPS in, and the API stays on `127.0.0.1:8080`.
+
+```bash
+git clone <your-repo> ~/moneyprinterturbo
+cd ~/moneyprinterturbo
+chmod +x scripts/deploy_oracle.sh
+./scripts/deploy_oracle.sh
+```
+
+The script checks Docker, prints free RAM and disk, and recommends a 2 GB swap file when both are tight. It does not create the swap file and it does not change the Oracle security list. The first run copies `.env.example` to `.env` and stops so you can fill it in. The second run starts Compose project **`moneyprinterturbo`** only.
+
+| What you set in `.env` | Why |
+| --- | --- |
+| `CLOUDFLARE_TUNNEL_TOKEN` | Named tunnel. When this is non-empty the script adds `--profile tunnel`. |
+| `PUBLIC_BASE_URL` | `https://api.example.com` with no trailing slash. |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_MODE=webhook`, `TELEGRAM_WEBHOOK_URL`, `TELEGRAM_WEBHOOK_SECRET` | Webhook URL is `https://api.example.com/telegram/webhook`. |
+| `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL` | Any OpenAI-compatible relay. Leave the host out of the image. |
+| `MPT_IMAGE` | `ghcr.io/<owner>/<repo>:main` after GitHub Actions publishes it. Empty builds on the VM. |
+| `API_KEY`, `WEB_PASSWORD` | Required before the hostname is public. |
+| `MPT_API_MEM_LIMIT`, `MPT_API_CPUS`, `MPT_API_PIDS_LIMIT` | Defaults are `1536m`, `1.0`, and `256`. Lower them if other bots need the RAM. |
+
+Docker limits (`mem_limit`, `cpus`, `pids_limit`) and json-file log rotation (`10m` × 3) are on every service. Render concurrency defaults to 1. `MPT_LOW_MEMORY` defaults to true in Compose: 720p, one MoviePy thread, libx264 `veryfast`. Set `MPT_LOW_MEMORY=false` for 1080p.
+
+Data lives in the named volume `mpt-data` mounted at `/MoneyPrinterTurbo/storage`. Rendered videos expire after `TASK_RETENTION_HOURS` (default 24). Stock clips stay under `MATERIAL_CACHE_MAX_MB` (default 512) by deleting the oldest first. `STORAGE_CAP_MB` (default 2048) is a hard cap for the whole directory. Set `DELETE_AFTER_DELIVERY=true` to remove a video after Telegram has delivered it and every publish job has succeeded. Compose uses true when that variable is unset. The sample `.env` leaves it false, so videos last until the 24 hour retention unless you turn the switch on. OAuth account tokens in `publish/accounts.json` are kept. Cleanup runs at startup and every hour. `GET /api/v1/admin/storage` shows usage. `POST /api/v1/admin/storage` with `{"action":"purge"}` deletes videos now. In Telegram, an admin sends `/storage` or `/storage purge`. Set `TELEGRAM_ADMIN_USER_IDS` (or the allowlist) first.
+
+On startup the API calls the relay's `GET /models` and logs whether `LLM_MODEL` is in that list. A 401, a missing model, or an unreachable host is an error in the log. The process still serves `/ping` so you can read the message.
+
+### Cloudflare
+
+1. In Zero Trust, create a named tunnel and copy the token into `CLOUDFLARE_TUNNEL_TOKEN`.
+2. Public hostname `api.example.com` → `http://api:8080`.
+3. Public hostname `studio.example.com` → `http://webui:8501`.
+4. Set `PUBLIC_BASE_URL=https://api.example.com`.
+5. Optional Cloudflare Access on **studio.example.com** only.
+
+Do not put Access in front of `/miniapp`, `/telegram/webhook`, or `/auth/*`. Telegram, Google, and TikTok cannot pass an Access login. Those routes live on the API hostname, so leave `api.example.com` without Access. The studio hostname is the one to protect.
+
+### GitHub
+
+Pushing to `main` runs the test workflow and `.github/workflows/docker-ghcr.yml`, which publishes `ghcr.io/<owner>/<repo>` for `linux/amd64` and `linux/arm64`. The deploy job SSHes to the VM only when the repository secrets `ORACLE_HOST`, `ORACLE_USER`, and `ORACLE_SSH_KEY` are set. Optional variable `ORACLE_APP_DIR` defaults to `~/moneyprinterturbo` on the server. The remote command is:
+
+```bash
+docker compose -p moneyprinterturbo pull
+docker compose -p moneyprinterturbo up -d --remove-orphans
+```
+
+That project name does not stop other containers. Put `MPT_IMAGE=ghcr.io/<owner>/<repo>:main` in the server `.env` so `pull` updates this app. The package must be readable by the VM (`docker login ghcr.io` once if the package is private).
+
+### Render
+
+`render.yaml` is a Docker web service for the API and Mini App in webhook mode, with a 2 GB persistent disk at `/MoneyPrinterTurbo/storage` and the same retention settings. A free Render service sleeps and has about 512 MB of RAM, which is too small to render a video. Use a paid plan with at least 2 GB. Set `PUBLIC_BASE_URL` to the Render URL and `TELEGRAM_WEBHOOK_URL` to that URL plus `/telegram/webhook`.
+
+### Disk hygiene
+
+Do not run `docker system prune -a` on a VM that hosts other apps. That deletes unused images and stopped containers for every project. For this stack:
+
+```bash
+docker compose -p moneyprinterturbo down
+docker image prune -f --filter label=com.docker.compose.project=moneyprinterturbo
+docker volume ls   # mpt-data is the only volume this project creates
+```
+
+`docker volume rm` on `moneyprinterturbo_mpt-data` deletes videos and OAuth tokens. Leave other volumes alone.
+
 ## How the pieces fit
 
 ```mermaid

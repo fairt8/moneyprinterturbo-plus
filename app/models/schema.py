@@ -38,12 +38,16 @@ class VideoAspect(str, Enum):
 
     def to_resolution(self):
         if self == VideoAspect.landscape:
-            return 1920, 1080
+            width, height = 1920, 1080
         elif self == VideoAspect.portrait:
-            return 1080, 1920
+            width, height = 1080, 1920
         elif self == VideoAspect.square:
-            return 1080, 1080
-        raise ValueError(f"unsupported video aspect: {self}")
+            width, height = 1080, 1080
+        else:
+            raise ValueError(f"unsupported video aspect: {self}")
+        from app.runtime.profile import fit_resolution
+
+        return fit_resolution(width, height)
 
 
 class VideoFitMode(str, Enum):

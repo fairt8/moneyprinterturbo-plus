@@ -1,4 +1,5 @@
-# Use an official Python runtime as a parent image
+# Slim Debian image. python:3.11-slim-bullseye publishes linux/amd64 and
+# linux/arm64, so the same Dockerfile runs on Oracle Ampere and on x86.
 FROM python:3.11-slim-bullseye
 
 # Set the working directory in the container
@@ -7,7 +8,10 @@ WORKDIR /MoneyPrinterTurbo
 # 设置/MoneyPrinterTurbo目录权限为777
 RUN chmod 777 /MoneyPrinterTurbo
 
-ENV PYTHONPATH="/MoneyPrinterTurbo"
+ENV PYTHONPATH="/MoneyPrinterTurbo" \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # 本地用户默认继续优先使用国内镜像；GitHub Actions 发布 GHCR 镜像时使用 default，
 # 避免海外 runner 访问国内镜像过慢导致镜像发布长时间卡住。
@@ -94,8 +98,8 @@ RUN if [ "$PIP_USE_OFFICIAL" = "1" ]; then \
 # Now copy the rest of the codebase into the image
 COPY . .
 
-# Expose the port the app runs on
-EXPOSE 8501
+# 8080 is the API. 8501 is Streamlit. Compose publishes both on 127.0.0.1 only.
+EXPOSE 8080 8501
 
 # 容器内部必须监听 0.0.0.0，宿主机仍通过 docker 端口映射限制为 127.0.0.1。
 # browser.serverAddress 只决定浏览器展示的访问地址，不能替代 server.address。

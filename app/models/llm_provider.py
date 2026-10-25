@@ -587,8 +587,18 @@ if len(LLM_PROVIDERS) != len(LLM_PROVIDER_REGISTRY):
     raise RuntimeError("duplicate LLM provider id in registry")
 
 
+# Names the owner can put in LLM_PROVIDER. They use the oneapi adapter, which
+# speaks the OpenAI chat API against whatever base URL is configured.
+_PROVIDER_ALIASES = {
+    "compatible": "oneapi",
+    "openai_compatible": "oneapi",
+}
+
+
 def get_llm_provider(provider_id: str) -> LLMProviderSpec | None:
-    return LLM_PROVIDERS.get((provider_id or "").lower())
+    normalized = (provider_id or "").lower()
+    normalized = _PROVIDER_ALIASES.get(normalized, normalized)
+    return LLM_PROVIDERS.get(normalized)
 
 
 def normalize_provider_override(value: str | None, default_value: str | None) -> str:

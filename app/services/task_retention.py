@@ -83,7 +83,7 @@ def cleanup_expired_tasks(
     return removed
 
 
-def retention_hours_from_config(app_config: dict, default: float = 72) -> float:
+def retention_hours_from_config(app_config: dict, default: float = 24) -> float:
     raw = app_config.get("task_retention_hours", default)
     try:
         if isinstance(raw, bool):
@@ -98,38 +98,25 @@ def retention_hours_from_config(app_config: dict, default: float = 72) -> float:
 
 
 def start_retention_worker(interval_seconds: int = 3600) -> threading.Thread | None:
-    """Sweep old tasks now and then once per interval. A non-positive retention disables it."""
+    """Sweep old tasks, clips, and logs now, then again on the interval.
+
+    A retention of 0 skips age-based task deletion. The storage cap and the
+    clip cache limit still run.
+    """
 
     from app.config import config
-    from app.services import state as sm
-    from app.services import task as task_service
-    from app.utils import utils
 
     hours = retention_hours_from_config(config.app)
-    if hours <= 0:
-        logger.info("task file cleanup is disabled (task_retention_hours <= 0)")
-        return None
 
-    def _busy(task_id: str) -> bool:
-        task = sm.state.get_task(task_id)
-        if not task:
-            return False
-        return task_service.is_task_busy(task)
+    def _sweep() -> None:
+        from app.services.storage_hygiene import run_scheduled_cleanup
 
-    def _delete_state(task_id: str) -> None:
-        sm.state.delete_task(task_id)
+        run_scheduled_cleanup()
 
     def _loop() -> None:
         while True:
             try:
-                removed = cleanup_expired_tasks(
-                    task_root=utils.task_dir(),
-                    max_age_hours=retention_hours_from_config(config.app),
-                    is_busy=_busy,
-                    delete_state=_delete_state,
-                )
-                if removed:
-                    logger.info(f"task cleanup removed {len(removed)} expired task(s)")
+                _sweep()
             except Exception as exc:
                 logger.exception(f"task cleanup failed: {exc}")
             time.sleep(interval_seconds)
@@ -137,16 +124,14 @@ def start_retention_worker(interval_seconds: int = 3600) -> threading.Thread | N
     # Run one pass immediately so a restarted container does not wait an hour
     # to reclaim disk, then keep sweeping from the background thread.
     try:
-        cleanup_expired_tasks(
-            task_root=utils.task_dir(),
-            max_age_hours=hours,
-            is_busy=_busy,
-            delete_state=_delete_state,
-        )
+        _sweep()
     except Exception as exc:
         logger.exception(f"initial task cleanup failed: {exc}")
 
     thread = threading.Thread(target=_loop, name="task-retention", daemon=True)
     thread.start()
-    logger.info(f"task cleanup will delete finished tasks older than {hours:g} hours")
+    if hours <= 0:
+        logger.info("age-based task deletion is off; the storage cap still applies")
+    else:
+        logger.info(f"task cleanup will delete finished tasks older than {hours:g} hours")
     return thread

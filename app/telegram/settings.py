@@ -72,12 +72,28 @@ class TelegramSettings:
     default_subtitles: bool = True
     video_source: str = "pexels"
     enabled: bool = False
+    admin_user_ids: frozenset[int] = frozenset()
 
     def is_user_allowed(self, user_id: int) -> bool:
         if not self.allowed_user_ids:
             return True
         try:
             return int(user_id) in self.allowed_user_ids
+        except (TypeError, ValueError):
+            return False
+
+    def is_admin(self, user_id: int) -> bool:
+        """Admins may inspect disk usage. An empty admin list uses the allowlist.
+
+        When both lists are empty the command is refused, so a public bot
+        cannot purge the disk.
+        """
+
+        allowed = self.admin_user_ids or self.allowed_user_ids
+        if not allowed:
+            return False
+        try:
+            return int(user_id) in allowed
         except (TypeError, ValueError):
             return False
 
@@ -171,4 +187,5 @@ def load_telegram_settings() -> TelegramSettings:
         default_subtitles=_bool(section.get("default_subtitles", True), True),
         video_source=str(app.get("video_source") or "pexels").strip() or "pexels",
         enabled=enabled,
+        admin_user_ids=_ids(section.get("admin_user_ids", [])),
     )

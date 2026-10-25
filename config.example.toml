@@ -523,8 +523,26 @@ subtitle_provider = "edge"
 # is only needed when a font tool reports an ImageMagick error.
 # imagemagick_path = ""
 
-# Delete finished task folders older than this many hours. 0 keeps them forever.
-task_retention_hours = 72
+# Delete finished task folders older than this many hours. 0 skips age-based
+# deletion. The storage cap below can still remove the oldest videos.
+task_retention_hours = 24
+
+# Downloaded stock clips and the material search cache stay under this many
+# megabytes. The oldest files are removed first. 0 disables the clip budget.
+material_cache_max_mb = 512
+
+# Hard cap for the whole storage directory, in megabytes. When usage is over
+# the cap, the oldest rendered videos and clips are deleted. OAuth account
+# tokens, local uploads, and background music are kept. 0 disables the cap.
+storage_cap_mb = 2048
+
+# Delete a rendered video after Telegram has delivered it and every publish
+# job for it has succeeded. Failed publishes keep the file until it expires.
+delete_after_delivery = false
+
+# 720p output, one encode thread, and a fast libx264 preset. Docker turns
+# this on with MPT_LOW_MEMORY. Leave false for 1080p on a larger machine.
+low_memory = false
 
 # Fail a stalled FFmpeg concatenation after this many seconds (default: 3600).
 # Increase this for unusually long videos or slow machines. On timeout, FFmpeg
@@ -576,7 +594,8 @@ redis_db = 0
 redis_password = ""
 
 # Maximum number of concurrent and queued API video-generation tasks.
-max_concurrent_tasks = 5
+# One render at a time is the safe default on a shared VM.
+max_concurrent_tasks = 1
 max_queued_tasks = 100
 
 # -----------------------------------------------------------------------------

@@ -1,3 +1,4 @@
+import os
 import sys
 
 from app.config import config
@@ -24,6 +25,11 @@ def __init_logger():
         level=_lvl,
         colorize=True,
     )
+    log_file = os.environ.get("MPT_LOG_FILE", "").strip()
+    if log_file:
+        from app.utils.logging_utils import configure_rotating_file_logger
+
+        configure_rotating_file_logger(log_file)
 
     # logger.add(
     #     _log_file,

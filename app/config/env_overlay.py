@@ -69,6 +69,10 @@ def apply_environment_overrides(
     take(app, "task_retention_hours", ("TASK_RETENTION_HOURS",), _int)
     take(app, "max_concurrent_tasks", ("MAX_CONCURRENT_TASKS",), _int)
     take(app, "max_queued_tasks", ("MAX_QUEUED_TASKS",), _int)
+    take(app, "material_cache_max_mb", ("MATERIAL_CACHE_MAX_MB",), _int)
+    take(app, "storage_cap_mb", ("STORAGE_CAP_MB",), _int)
+    take(app, "delete_after_delivery", ("DELETE_AFTER_DELIVERY",), _bool)
+    take(app, "low_memory", ("MPT_LOW_MEMORY",), _bool)
 
     provider_keys = (
         "openai",
@@ -97,6 +101,7 @@ def apply_environment_overrides(
     take(telegram, "media_token_secret", ("MEDIA_TOKEN_SECRET",))
     take(telegram, "service_secret", ("TELEGRAM_SERVICE_SECRET",))
     take(telegram, "allowed_user_ids", ("TELEGRAM_ALLOWED_USER_IDS",), _user_ids)
+    take(telegram, "admin_user_ids", ("TELEGRAM_ADMIN_USER_IDS",), _user_ids)
     take(telegram, "rate_limit_per_hour", ("TELEGRAM_RATE_LIMIT_PER_HOUR",), _int)
     take(telegram, "enabled", ("TELEGRAM_ENABLED",), _bool)
     take(telegram, "api_base_url", ("MPT_API_BASE_URL",))
@@ -109,6 +114,8 @@ def apply_environment_overrides(
     if publish is not None:
         _apply_publish_environment(publish, env, applied, take)
 
+    _apply_generic_llm(app, env, applied)
+
     # A public URL should also make API download links absolute when the
     # operator did not set a separate endpoint.
     public_base = str(telegram.get("public_base_url") or "").strip()
@@ -116,6 +123,45 @@ def apply_environment_overrides(
         app["endpoint"] = public_base.rstrip("/")
 
     return applied
+
+
+def _apply_generic_llm(app: dict, env: Mapping[str, str], applied: list[str]) -> None:
+    """Map LLM_API_KEY, LLM_BASE_URL, and LLM_MODEL onto an OpenAI-compatible provider.
+
+    A custom relay uses provider ``oneapi``. ``compatible`` and
+    ``openai_compatible`` are the same provider. When ``LLM_PROVIDER=openai``
+    and the OpenAI-specific variables are empty, the generic variables fill
+    those fields instead. A different provider is left unchanged.
+    """
+
+    key = env.get("LLM_API_KEY", "").strip()
+    base = env.get("LLM_BASE_URL", "").strip().rstrip("/")
+    model = env.get("LLM_MODEL", "").strip()
+    if not key and not base and not model:
+        return
+
+    # These three variables are the generic relay. They override the provider
+    # saved in config.toml unless LLM_PROVIDER names a different vendor.
+    explicit = env.get("LLM_PROVIDER", "").strip().lower()
+    if explicit and explicit not in {"oneapi", "compatible", "openai_compatible", "openai"}:
+        return
+    if explicit == "openai":
+        target = "openai"
+    else:
+        target = "oneapi"
+        app["llm_provider"] = "oneapi"
+        if "LLM_PROVIDER" not in applied:
+            applied.append("LLM_PROVIDER")
+
+    if key and not str(app.get(f"{target}_api_key") or "").strip():
+        app[f"{target}_api_key"] = key
+        applied.append("LLM_API_KEY")
+    if base and not str(app.get(f"{target}_base_url") or "").strip():
+        app[f"{target}_base_url"] = base
+        applied.append("LLM_BASE_URL")
+    if model and not str(app.get(f"{target}_model_name") or "").strip():
+        app[f"{target}_model_name"] = model
+        applied.append("LLM_MODEL")
 
 
 def _apply_publish_environment(publish: dict, env: Mapping[str, str], applied: list[str], take) -> None:

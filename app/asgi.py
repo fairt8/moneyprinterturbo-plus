@@ -50,6 +50,9 @@ async def application_lifespan(_: FastAPI):
     from app.utils.utils import check_ffmpeg_ready
 
     check_ffmpeg_ready()
+    from app.services.llm_check import log_llm_startup_check
+
+    log_llm_startup_check()
     start_retention_worker()
     from app.publish.queue import start_publish_worker
 

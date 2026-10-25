@@ -115,7 +115,8 @@ class Conversation:
             "too large for Telegram.\n\n"
             "/new clears the topic. /settings shows the current options. "
             "/status checks the latest video. /accounts links YouTube channels "
-            "and TikTok accounts and chooses who receives a finished video.\n"
+            "and TikTok accounts and chooses who receives a finished video. "
+            "/storage shows disk usage. An admin can send /storage purge.\n"
             f"{limit_line}",
             buttons=self._start_buttons(),
         )
@@ -136,6 +137,26 @@ class Conversation:
             return blocked
         session = self._load(user_id)
         return Reply(self._summary(session), buttons=self._summary_buttons(session))
+
+    def on_storage(self, user_id: int, argument: str = "", chat_type: str = "private") -> Reply:
+        blocked = self._guard(user_id, chat_type)
+        if blocked:
+            return blocked
+        if not self.settings.is_admin(user_id):
+            return Reply(
+                "Only an admin can inspect storage. Set TELEGRAM_ADMIN_USER_IDS "
+                "to your numeric Telegram id, or set TELEGRAM_ALLOWED_USER_IDS."
+            )
+        from app.services.storage_hygiene import format_report, purge_storage, report_storage
+
+        if (argument or "").strip().lower() == "purge":
+            report = purge_storage()
+            removed = len(report.get("removed_tasks") or [])
+            return Reply(
+                f"Purged {removed} rendered video(s). OAuth account tokens were kept.\n\n"
+                + format_report(report)
+            )
+        return Reply(format_report(report_storage()))
 
     def on_status(self, user_id: int, chat_type: str = "private") -> Reply:
         blocked = self._guard(user_id, chat_type)

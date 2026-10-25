@@ -93,6 +93,10 @@ _CLIP_PROCESSING_CONCURRENCY = 1
 
 
 def _get_clip_processing_concurrency() -> int:
+    from app.runtime.profile import low_memory_enabled
+
+    if low_memory_enabled():
+        return 1
     try:
         concurrency = int(config.app.get("video_clip_concurrency", _CLIP_PROCESSING_CONCURRENCY))
     except (TypeError, ValueError):
@@ -440,7 +444,11 @@ def _write_videofile_with_codec_fallback(
     硬件编码器是否可用不仅取决于 FFmpeg，还取决于显卡、驱动和当前运行环境。
     生成任务不能因为高级编码器不可用而整体失败，所以这里把回退集中处理。
     """
-    kwargs.setdefault("ffmpeg_params", _BT709_FFMPEG_PARAMS)
+    from app.runtime.profile import ffmpeg_extra_params
+
+    kwargs["ffmpeg_params"] = ffmpeg_extra_params(
+        kwargs.get("ffmpeg_params") or _BT709_FFMPEG_PARAMS
+    )
     if atomic_output:
         # Final videos can be downloaded by path while they are being rendered.
         # Keep both failed encodes and in-progress writes away from that path.
@@ -1874,6 +1882,8 @@ def generate_video(
         # 显式沿用输入音频的采样率；如果取不到，再回退 MoviePy 默认的 44100Hz。
         # 这样可以减少不同环境，尤其 Docker 中再次重采样带来的音质波动。
         output_audio_fps = int(getattr(audio_clip, "fps", 0) or 44100)
+        from app.runtime.profile import encode_threads
+
         with _stage_heartbeat("final video render"):
             _write_videofile_with_codec_fallback(
                 final_video_clip,
@@ -1884,7 +1894,7 @@ def generate_video(
                 audio_fps=output_audio_fps,
                 audio_bitrate=audio_bitrate,
                 temp_audiofile_path=_get_temp_audio_dir(output_dir),
-                threads=params.n_threads or 2,
+                threads=encode_threads(params.n_threads),
                 logger=None,
                 fps=fps,
             )

@@ -1,6 +1,16 @@
-# API, Streamlit WebUI, and Telegram bot.
+# API, Streamlit WebUI, Telegram bot, and an optional Cloudflare tunnel.
 # Copy config.example.toml to config.toml and .env.example to .env first.
 # Compose reads .env for the ${VAR:-} substitutions below.
+#
+# The project name is fixed so this stack never attaches to another
+# application's containers on a shared VM.
+name: moneyprinterturbo
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: ${MPT_LOG_MAX_SIZE:-10m}
+    max-file: ${MPT_LOG_MAX_FILE:-3}
 
 x-app-env: &app-env
   TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
@@ -8,6 +18,7 @@ x-app-env: &app-env
   TELEGRAM_WEBHOOK_URL: ${TELEGRAM_WEBHOOK_URL:-}
   TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
   TELEGRAM_ALLOWED_USER_IDS: ${TELEGRAM_ALLOWED_USER_IDS:-}
+  TELEGRAM_ADMIN_USER_IDS: ${TELEGRAM_ADMIN_USER_IDS:-}
   TELEGRAM_RATE_LIMIT_PER_HOUR: ${TELEGRAM_RATE_LIMIT_PER_HOUR:-5}
   TELEGRAM_PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
   PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
@@ -16,6 +27,9 @@ x-app-env: &app-env
   TELEGRAM_SERVICE_SECRET: ${TELEGRAM_SERVICE_SECRET:-}
   API_KEY: ${API_KEY:-}
   LLM_PROVIDER: ${LLM_PROVIDER:-}
+  LLM_API_KEY: ${LLM_API_KEY:-}
+  LLM_BASE_URL: ${LLM_BASE_URL:-}
+  LLM_MODEL: ${LLM_MODEL:-}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
   OPENAI_MODEL_NAME: ${OPENAI_MODEL_NAME:-}
@@ -28,8 +42,13 @@ x-app-env: &app-env
   PIXABAY_API_KEYS: ${PIXABAY_API_KEYS:-}
   FFMPEG_PATH: ${FFMPEG_PATH:-}
   IMAGEMAGICK_PATH: ${IMAGEMAGICK_PATH:-}
-  TASK_RETENTION_HOURS: ${TASK_RETENTION_HOURS:-72}
-  MAX_CONCURRENT_TASKS: ${MAX_CONCURRENT_TASKS:-2}
+  TASK_RETENTION_HOURS: ${TASK_RETENTION_HOURS:-24}
+  MATERIAL_CACHE_MAX_MB: ${MATERIAL_CACHE_MAX_MB:-512}
+  STORAGE_CAP_MB: ${STORAGE_CAP_MB:-2048}
+  DELETE_AFTER_DELIVERY: ${DELETE_AFTER_DELIVERY:-true}
+  MPT_LOW_MEMORY: ${MPT_LOW_MEMORY:-true}
+  MAX_CONCURRENT_TASKS: ${MAX_CONCURRENT_TASKS:-1}
+  MPT_LOG_FILE: /MoneyPrinterTurbo/storage/logs/server.log
   YOUTUBE_CLIENT_ID: ${YOUTUBE_CLIENT_ID:-}
   YOUTUBE_CLIENT_SECRET: ${YOUTUBE_CLIENT_SECRET:-}
   YOUTUBE_REDIRECT_URI: ${YOUTUBE_REDIRECT_URI:-}
@@ -47,7 +66,7 @@ x-app-env: &app-env
 
 x-app-volumes: &app-volumes
   - ./config.toml:/MoneyPrinterTurbo/config.toml
-  - ./storage:/MoneyPrinterTurbo/storage
+  - mpt-data:/MoneyPrinterTurbo/storage
 
 services:
   api:
@@ -57,7 +76,7 @@ services:
       args:
         DOCKER_BUILD_MIRROR: default
         PIP_USE_OFFICIAL: "1"
-    image: moneyprinterturbo:local
+    image: ${MPT_IMAGE:-moneyprinterturbo:local}
     container_name: moneyprinterturbo-api
     command: ["python3", "main.py"]
     environment:
@@ -65,6 +84,10 @@ services:
     volumes: *app-volumes
     ports:
       - "127.0.0.1:8080:8080"
+    mem_limit: ${MPT_API_MEM_LIMIT:-1536m}
+    cpus: ${MPT_API_CPUS:-1.0}
+    pids_limit: ${MPT_API_PIDS_LIMIT:-256}
+    logging: *default-logging
     restart: unless-stopped
     healthcheck:
       test:
@@ -80,7 +103,7 @@ services:
       start_period: 40s
 
   webui:
-    image: moneyprinterturbo:local
+    image: ${MPT_IMAGE:-moneyprinterturbo:local}
     container_name: moneyprinterturbo-webui
     command:
       [
@@ -101,20 +124,47 @@ services:
     volumes: *app-volumes
     ports:
       - "127.0.0.1:8501:8501"
+    mem_limit: ${MPT_WEBUI_MEM_LIMIT:-512m}
+    cpus: ${MPT_WEBUI_CPUS:-0.5}
+    pids_limit: ${MPT_WEBUI_PIDS_LIMIT:-128}
+    logging: *default-logging
     depends_on:
       api:
         condition: service_healthy
     restart: unless-stopped
 
   bot:
-    image: moneyprinterturbo:local
+    image: ${MPT_IMAGE:-moneyprinterturbo:local}
     container_name: moneyprinterturbo-bot
     command: ["python3", "-m", "app.telegram"]
     environment:
       <<: *app-env
       MPT_API_BASE_URL: http://api:8080
     volumes: *app-volumes
+    mem_limit: ${MPT_BOT_MEM_LIMIT:-256m}
+    cpus: ${MPT_BOT_CPUS:-0.25}
+    pids_limit: ${MPT_BOT_PIDS_LIMIT:-128}
+    logging: *default-logging
     depends_on:
       api:
         condition: service_healthy
     restart: unless-stopped
+
+  # Started only with: docker compose --profile tunnel up -d
+  # The token's ingress (hostname -> http://api:8080) is set in Cloudflare.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: moneyprinterturbo-cloudflared
+    command: ["tunnel", "--no-autoupdate", "run", "--token", "${CLOUDFLARE_TUNNEL_TOKEN}"]
+    profiles: ["tunnel"]
+    mem_limit: ${MPT_TUNNEL_MEM_LIMIT:-128m}
+    cpus: ${MPT_TUNNEL_CPUS:-0.25}
+    pids_limit: ${MPT_TUNNEL_PIDS_LIMIT:-64}
+    logging: *default-logging
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  mpt-data:

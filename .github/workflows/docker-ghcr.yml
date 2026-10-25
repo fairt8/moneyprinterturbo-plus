@@ -21,7 +21,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  IMAGE_NAME: ghcr.io/harry0703/moneyprinterturbo
+  IMAGE_NAME: ghcr.io/${{ github.repository }}
 
 jobs:
   publish:
@@ -73,3 +73,35 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy on Oracle
+    needs: publish
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Pull and restart this Compose project
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+          ORACLE_APP_DIR: ${{ vars.ORACLE_APP_DIR }}
+        run: |
+          if [ -z "${ORACLE_HOST}" ] || [ -z "${ORACLE_USER}" ] || [ -z "${ORACLE_SSH_KEY}" ]; then
+            echo "ORACLE_HOST, ORACLE_USER, or ORACLE_SSH_KEY is unset. Skipping deploy."
+            exit 0
+          fi
+          install -d -m 700 "${HOME}/.ssh"
+          printf '%s\n' "${ORACLE_SSH_KEY}" > "${HOME}/.ssh/oracle_deploy"
+          chmod 600 "${HOME}/.ssh/oracle_deploy"
+          ssh -i "${HOME}/.ssh/oracle_deploy" \
+            -o StrictHostKeyChecking=accept-new \
+            "${ORACLE_USER}@${ORACLE_HOST}" \
+            "APP_DIR=$(printf '%q' "${ORACLE_APP_DIR}") bash -s" <<'REMOTE'
+          set -eu
+          cd "${APP_DIR:-$HOME/moneyprinterturbo}"
+          docker compose -p moneyprinterturbo pull
+          docker compose -p moneyprinterturbo up -d --remove-orphans
+          REMOTE
+          rm -f "${HOME}/.ssh/oracle_deploy"

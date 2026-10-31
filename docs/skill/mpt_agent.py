@@ -31,6 +31,8 @@ SUPPORTED_SOURCES = {
     "pexels",
     "pixabay",
     "coverr",
+    "openverse",
+    "wikimedia",
     "wavespeed",
     "volcengine_seedance",
     "ofox",
@@ -474,6 +476,10 @@ def missing_config(config_path: Path, cli_args: list[str]) -> tuple[str, list[st
             missing.append("muapi_api_key")
         if not has_cli_option(cli_args, "--confirm-muapi-charge"):
             missing.append("confirm_muapi_charge")
+    elif source in {"openverse", "wikimedia"}:
+        # CC0 / public-domain fallbacks. Anonymous access is enough; an Openverse
+        # OAuth client is optional and is not required to start a task.
+        pass
     elif source == "openai_image":
         # 与运行时的 is_openai_image_enabled() 保持一致：文生图素材源只要求端点
         # 与模型名。完全本地的 ComfyUI/SD 网关允许不配置 API Key，因此这里不

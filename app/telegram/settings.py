@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 
@@ -116,6 +117,23 @@ class TelegramSettings:
         return bool(self.bot_token or self.web_password or self.api_key)
 
 
+def _telegram_enabled(section, token: str) -> bool:
+    """Turn the bot on when a token exists unless TELEGRAM_ENABLED says otherwise.
+
+    The environment value overrides config.toml. Docker Compose forwards
+    TELEGRAM_ENABLED and defaults it to true. When the variable is unset, a
+    configured token still starts the bot, including deployments whose
+    config.toml was copied while ``enabled = false``.
+    """
+
+    raw = os.environ.get("TELEGRAM_ENABLED")
+    if raw is not None and str(raw).strip() != "":
+        return _bool(raw, False)
+    if token:
+        return True
+    return _bool(section.get("enabled", False), False)
+
+
 def load_telegram_settings() -> TelegramSettings:
     from app.config import config
 
@@ -135,11 +153,7 @@ def load_telegram_settings() -> TelegramSettings:
         section.get("public_base_url") or app.get("endpoint") or ""
     ).strip().rstrip("/")
 
-    enabled_raw = section.get("enabled", None)
-    if enabled_raw is None:
-        enabled = bool(token)
-    else:
-        enabled = _bool(enabled_raw, False)
+    enabled = _telegram_enabled(section, token)
 
     paragraphs = _int(section.get("default_paragraphs", 1), 1)
     paragraphs = min(10, max(1, paragraphs))

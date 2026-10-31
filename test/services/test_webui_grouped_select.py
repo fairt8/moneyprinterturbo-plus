@@ -117,6 +117,8 @@ def test_grouped_video_source_keeps_groups_and_accessible_label_binding():
         ] == [
             "pexels",
             "pixabay",
+            "openverse",
+            "wikimedia",
             "coverr",
             "metaso_minimax",
             "ofox",

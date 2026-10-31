@@ -11,8 +11,10 @@ from dataclasses import dataclass, field
 
 from app.telegram.presets import (
     ASPECTS,
+    FOOTAGE_SOURCES,
     LANGUAGES,
     VALID_ASPECTS,
+    VALID_FOOTAGE_SOURCES,
     VALID_LANGUAGES,
     VOICE_NAME_RE_SOURCE,
     VOICES,
@@ -80,6 +82,7 @@ class Conversation:
             if self.settings.default_language in VALID_LANGUAGES
             else "",
             "subtitles": self.settings.default_subtitles,
+            "video_source": self.settings.video_source or "pixabay",
             "topic": "",
             "task_id": "",
             "awaiting": "",
@@ -234,6 +237,13 @@ class Conversation:
         if data == "lang":
             labeled = tuple((code or "auto", label) for code, label in LANGUAGES)
             return Reply("Which language should the script use?", buttons=self._choice_buttons("l", labeled))
+        if data == "footage":
+            return Reply(
+                "Choose stock footage. Pixabay is the usual primary source. "
+                "Openverse and Wikimedia Commons add CC0 and public-domain files "
+                "when an earlier source comes up short.",
+                buttons=self._choice_buttons("src", FOOTAGE_SOURCES),
+            )
         if data == "subs":
             return Reply(
                 "Subtitles",
@@ -261,6 +271,8 @@ class Conversation:
             session["subtitles"] = True
         elif data == "s:0":
             session["subtitles"] = False
+        elif data.startswith("src:") and data[4:] in VALID_FOOTAGE_SOURCES:
+            session["video_source"] = data[4:]
         else:
             return Reply("That button is no longer valid. Use /settings to start again.")
 
@@ -288,7 +300,7 @@ class Conversation:
             paragraphs=int(session["paragraphs"]),
             language=session.get("language") or "",
             subtitles=bool(session.get("subtitles", True)),
-            video_source=self.settings.video_source,
+            video_source=session.get("video_source") or self.settings.video_source,
         )
         try:
             task_id = self.pipeline.submit(owner, topic, options)
@@ -316,13 +328,15 @@ class Conversation:
         topic = session.get("topic") or "(send a topic)"
         language = session.get("language") or "auto"
         subtitles = "on" if session.get("subtitles", True) else "off"
+        footage = session.get("video_source") or self.settings.video_source
         return (
             f"Topic: {topic}\n"
             f"Frame: {session.get('aspect')}\n"
             f"Voice: {session.get('voice')}\n"
             f"Length: {session.get('paragraphs')} paragraph(s)\n"
             f"Language: {language}\n"
-            f"Subtitles: {subtitles}\n\n"
+            f"Subtitles: {subtitles}\n"
+            f"Footage: {footage}\n\n"
             "Press Generate, or change one option."
         )
 
@@ -341,6 +355,7 @@ class Conversation:
                     {"text": "Language", "callback_data": "lang"},
                 ],
                 [{"text": "Subtitles", "callback_data": "subs"}],
+                [{"text": "Footage", "callback_data": "footage"}],
                 [{"text": "Accounts", "callback_data": "ac"}],
             ]
         )

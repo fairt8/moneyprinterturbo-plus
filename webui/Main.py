@@ -132,7 +132,7 @@ LOOMLOOM_MAX_POLL_FAILURES = 5
 # 胜算云、火山引擎排列；其余服务随后展示。这样两个入口的顺序一致，同时
 # 不改变 config.toml、历史任务和 API 请求中的字段语义，旧用户无需迁移配置。
 VIDEO_SOURCE_GROUPS = {
-    "stock_video": ("pexels", "pixabay", "coverr"),
+    "stock_video": ("pexels", "pixabay", "openverse", "wikimedia", "coverr"),
     "ai_video": (
         "metaso_minimax",
         "ofox",
@@ -3696,6 +3696,52 @@ def _render_settings_dialog():
                 )
                 _save_material_api_keys("coverr_api_keys", coverr_api_key)
 
+                saved_video_sources = config.app.get("video_sources") or [
+                    "pixabay",
+                    "openverse",
+                    "wikimedia",
+                ]
+                if isinstance(saved_video_sources, (list, tuple)):
+                    saved_video_sources_text = ", ".join(
+                        str(item) for item in saved_video_sources if str(item).strip()
+                    )
+                else:
+                    saved_video_sources_text = str(saved_video_sources or "")
+                video_sources_text = st.text_input(
+                    tr("Video Sources"),
+                    value=saved_video_sources_text,
+                    help=tr("Video Sources Help"),
+                    key="video_sources_input",
+                )
+                _set_runtime_config(
+                    "app",
+                    "video_sources",
+                    [
+                        item.strip().lower()
+                        for item in video_sources_text.split(",")
+                        if item.strip()
+                    ],
+                )
+                openverse_client_id = st.text_input(
+                    tr("Openverse Client ID"),
+                    value=str(config.app.get("openverse_client_id", "") or ""),
+                    help=tr("Openverse Client ID Help"),
+                    key="openverse_client_id_input",
+                )
+                _set_runtime_config("app", "openverse_client_id", openverse_client_id.strip())
+                openverse_client_secret = st.text_input(
+                    tr("Openverse Client Secret"),
+                    value=str(config.app.get("openverse_client_secret", "") or ""),
+                    type="password",
+                    help=tr("Openverse Client Secret Help"),
+                    key="openverse_client_secret_input",
+                )
+                _set_runtime_config(
+                    "app",
+                    "openverse_client_secret",
+                    openverse_client_secret.strip(),
+                )
+
             with st.container(border=True):
                 st.markdown(f"#### {tr('AI Video Generation APIs')}")
                 st.caption(tr("AI Video Generation APIs Help"))
@@ -5218,6 +5264,8 @@ def _render_video_settings(panel, params):
             video_source_labels = {
                 "pexels": tr("Pexels"),
                 "pixabay": tr("Pixabay"),
+                "openverse": tr("Openverse"),
+                "wikimedia": tr("Wikimedia Commons"),
                 "coverr": tr("Coverr"),
                 "wavespeed": tr("WaveSpeed AI Video"),
                 "volcengine_seedance": tr("Volcano Engine Seedance"),
@@ -5265,6 +5313,8 @@ def _render_video_settings(panel, params):
                 st.caption(tr("Metaso MiniMax H3 Help"))
             if params.video_source == "muapi":
                 st.caption(tr("MuAPI AI Video Help"))
+            if params.video_source in {"openverse", "wikimedia", "pixabay"}:
+                st.caption(tr("CC0 Stock Fallback Help"))
             if params.video_source == "local":
                 # Streamlit 的文件类型校验对扩展名大小写敏感，这里同时放行大小写两种形式。
                 local_file_types = sorted(
@@ -5529,7 +5579,7 @@ def _render_video_settings(panel, params):
                 _set_runtime_config("app", "video_codec", selected_video_codec)
 
             concurrency_options = [1, 2, 4, 6, 8]
-            if params.video_source in {"pexels", "pixabay", "coverr"}:
+            if params.video_source in {"pexels", "pixabay", "coverr", "openverse", "wikimedia"}:
                 selected_material_concurrency = stable_selectbox(
                     tr("Material Concurrency"),
                     options=concurrency_options,
@@ -8078,6 +8128,8 @@ def _render_generation_controls(
             "pexels",
             "pixabay",
             "coverr",
+            "openverse",
+            "wikimedia",
             "wavespeed",
             "volcengine_seedance",
             "ofox",

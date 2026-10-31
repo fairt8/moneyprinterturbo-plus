@@ -15,8 +15,10 @@ from app.telegram.inprocess import InProcessPipeline
 from app.telegram.logic import JobOptions, PipelineError
 from app.telegram.presets import (
     ASPECTS,
+    FOOTAGE_SOURCES,
     LANGUAGES,
     VALID_ASPECTS,
+    VALID_FOOTAGE_SOURCES,
     VALID_LANGUAGES,
     VOICE_NAME_RE_SOURCE,
     VOICES,
@@ -90,6 +92,9 @@ def miniapp_bootstrap(request: Request):
             "languages": [
                 {"value": value, "label": label} for value, label in LANGUAGES
             ],
+            "sources": [
+                {"value": value, "label": label} for value, label in FOOTAGE_SOURCES
+            ],
             "defaults": {
                 "video_aspect": settings.default_aspect
                 if settings.default_aspect in VALID_ASPECTS
@@ -100,6 +105,9 @@ def miniapp_bootstrap(request: Request):
                 if settings.default_language in VALID_LANGUAGES
                 else "",
                 "subtitle_enabled": settings.default_subtitles,
+                "video_source": settings.video_source
+                if settings.video_source in VALID_FOOTAGE_SOURCES
+                else "pixabay",
             },
         },
     }
@@ -157,13 +165,25 @@ def create_miniapp_video(request: Request, body: dict = Body(...)):
     if not isinstance(subtitles, bool):
         raise HttpException(task_id="", status_code=400, message="Subtitles must be true or false.")
 
+    requested_source = body.get("video_source")
+    if requested_source is None or str(requested_source).strip() == "":
+        video_source = settings.video_source or "pixabay"
+    else:
+        video_source = str(requested_source).strip()
+        if video_source not in VALID_FOOTAGE_SOURCES:
+            raise HttpException(
+                task_id="",
+                status_code=400,
+                message="Choose Pixabay, Openverse, Wikimedia Commons, Pexels, or Coverr.",
+            )
+
     options = JobOptions(
         aspect=aspect,
         voice=voice,
         paragraphs=paragraphs,
         language=language,
         subtitles=subtitles,
-        video_source=settings.video_source,
+        video_source=video_source,
     )
     try:
         task_id = get_pipeline().submit(principal.owner, topic, options)

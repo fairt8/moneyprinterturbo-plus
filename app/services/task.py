@@ -96,7 +96,7 @@ _VIDEO_MUSIC_PROVIDERS = {
 
 
 _SUPPORTED_VIDEO_SOURCES = frozenset({
-    "pexels", "pixabay", "coverr", "local", "wavespeed",
+    "pexels", "pixabay", "coverr", "openverse", "wikimedia", "local", "wavespeed",
     "volcengine_seedance", "ofox", "metaso_minimax", "muapi",
     "loomloom", "openai_image",
 })
@@ -994,7 +994,7 @@ def generate_final_videos(
             warnings=warnings,
         )
     allocate_batch_materials = params.video_count > 1 and params.video_source in {
-        "pexels", "pixabay", "coverr", "local"
+        "pexels", "pixabay", "coverr", "openverse", "wikimedia", "local"
     }
     source_usage = {}
     material_selections = []
@@ -1789,7 +1789,7 @@ def _run_pipeline(
     )
     if not downloaded_videos:
         material_hint = ""
-        if params.video_source in {"pexels", "pixabay", "coverr"}:
+        if params.video_source in {"pexels", "pixabay", "coverr", "openverse", "wikimedia"}:
             material_hint = (
                 " Check the stock-footage API key, the search terms, and that "
                 "this server can reach the provider."

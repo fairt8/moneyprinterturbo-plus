@@ -99,6 +99,19 @@ pexels_api_keys = []
 # Register at https://pixabay.com/api/docs/
 pixabay_api_keys = []
 
+# Ordered stock search. Pixabay is first. Openverse and Wikimedia Commons are
+# used only when an earlier provider returns too few clips or errors. Both
+# fallbacks keep CC0 and public-domain files only. Unsplash is not used.
+# VIDEO_SOURCES overrides this list. Leave it unset to use the built-in order
+# whenever video_source is pixabay, openverse, or wikimedia.
+# video_sources = ["pixabay", "openverse", "wikimedia"]
+
+# Optional Openverse OAuth client. Anonymous requests work with a lower limit.
+# Register at https://api.openverse.org/v1/ (Register and Authenticate).
+# OPENVERSE_CLIENT_ID and OPENVERSE_CLIENT_SECRET override these values.
+openverse_client_id = ""
+openverse_client_secret = ""
+
 # Register at https://coverr.co/developers?ctx=header_navigation
 coverr_api_keys = []
 
@@ -812,6 +825,9 @@ open_task_folder_on_completion = true
 # Real tokens stay in config.toml or the environment. See .env.example.
 # =============================================================================
 [telegram]
+# The bot starts when a token is set. TELEGRAM_ENABLED=false keeps the process
+# idle even if bot_token or TELEGRAM_BOT_TOKEN is present. The environment
+# value overrides this file.
 enabled = false
 bot_token = ""
 # polling uses getUpdates. webhook receives updates on the API.

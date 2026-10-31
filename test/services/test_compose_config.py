@@ -31,4 +31,9 @@ def test_compose_runs_api_webui_and_bot():
     assert "imagemagick" in dockerfile
     assert "ffmpeg" in dockerfile
     assert "linux/arm64" in dockerfile
+    assert "python:3.11-slim-bookworm" in dockerfile
+    assert "bookworm-security" in dockerfile
+    assert services["api"]["environment"]["TELEGRAM_ENABLED"] == "${TELEGRAM_ENABLED:-true}"
+    assert services["api"]["environment"]["VIDEO_SOURCES"] == "${VIDEO_SOURCES:-pixabay,openverse,wikimedia}"
+    assert services["api"]["environment"]["VIDEO_SOURCE"] == "${VIDEO_SOURCE:-pixabay}"
     assert "python-telegram-bot" in (ROOT / "requirements.txt").read_text()

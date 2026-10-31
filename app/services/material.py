@@ -28,6 +28,7 @@ from app.services import (
     metaso_minimax,
     muapi,
     ofox,
+    stock_media,
     task_artifacts,
     video,
     volcengine_seedance,
@@ -143,6 +144,13 @@ def _material_source_record(item: MaterialInfo, local_path: str) -> dict[str, An
     if creator:
         record["creator"] = creator
 
+    license_name = source.get("license")
+    if isinstance(license_name, str) and license_name.strip():
+        record["license"] = license_name.strip()
+    license_url = _safe_public_url(source.get("license_url"))
+    if license_url:
+        record["license_url"] = license_url
+
     raw_rendition = source.get("rendition")
     if isinstance(raw_rendition, dict):
         rendition = {}
@@ -176,6 +184,7 @@ def _persist_material_sources(
                 f"saved material source records: "
                 f"task_id={task_id}, count={len(material_sources)}"
             )
+        stock_media.write_sources_manifest(task_id, material_sources)
     except Exception as exc:
         # task_artifacts 自身已经按失败降级设计，这里仍保留最后一道隔离，
         # 防止未来实现调整或目录解析异常意外影响素材下载返回值。
@@ -1161,7 +1170,7 @@ def _describe_download_progress(
     return f"{downloaded_mb:.1f} MB, {speed:.2f} MB/s"
 
 
-def save_video(video_url: str, save_dir: str = "") -> str:
+def save_video(video_url: str, save_dir: str = "", user_agent: str = "") -> str:
     if not save_dir:
         save_dir = utils.storage_dir("cache_videos")
 
@@ -1181,7 +1190,11 @@ def save_video(video_url: str, save_dir: str = "") -> str:
         return video_path
 
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+        "User-Agent": user_agent
+        or (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+        )
     }
 
     # A nonempty file is treated as a cache hit above. Keep the final path
@@ -2011,6 +2024,128 @@ def _search_terms_in_parallel(
         return results
 
 
+def _searcher_for_provider(provider: str):
+    if provider == "pixabay":
+        return search_videos_pixabay
+    if provider == "coverr":
+        return search_videos_coverr
+    if provider == "openverse":
+        return stock_media.search_images_openverse
+    if provider == "wikimedia":
+        return stock_media.search_media_wikimedia
+    return search_videos_pexels
+
+
+def _store_downloaded_material(item: MaterialInfo, save_dir: str) -> str:
+    """Save a stock video, or turn a CC0/public-domain still into a short clip."""
+
+    info = item.source_info if isinstance(item.source_info, dict) else {}
+    if info.get("media_kind") == "image":
+        frame = info.get("frame") if isinstance(info.get("frame"), dict) else {}
+        try:
+            width = int(frame.get("width") or 0)
+            height = int(frame.get("height") or 0)
+        except (TypeError, ValueError):
+            width = height = 0
+        return stock_media.save_image_clip(
+            item.url,
+            save_dir,
+            duration=max(1, int(item.duration or 4)),
+            width=width,
+            height=height,
+        )
+    if item.provider in {"openverse", "wikimedia"}:
+        return save_video(
+            item.url,
+            save_dir,
+            user_agent=stock_media.stock_user_agent(),
+        )
+    return save_video(item.url, save_dir)
+
+
+def _gather_stock_term_groups(
+    search_terms: List[str],
+    source: str,
+    minimum_duration: int,
+    video_aspect: VideoAspect,
+    audio_duration: float,
+) -> list[tuple[str, List[MaterialInfo]]]:
+    """Search providers in order until the narration is covered or the list ends."""
+
+    try:
+        configured = config.app.get("video_sources")
+    except Exception:
+        configured = None
+    chain = stock_media.provider_chain(source, configured)
+    grouped: dict[str, List[MaterialInfo]] = {term: [] for term in search_terms}
+    seen: set[str] = set()
+    found_duration = 0.0
+    try:
+        required = float(audio_duration or 0)
+    except (TypeError, ValueError):
+        required = 0.0
+
+    for index, provider in enumerate(chain):
+        searcher = _searcher_for_provider(provider)
+
+        def search_one(
+            search_term: str,
+            minimum_duration: int,
+            video_aspect: VideoAspect,
+            _searcher=searcher,
+            _provider=provider,
+        ) -> List[MaterialInfo]:
+            return _search_videos_with_cache(
+                provider=_provider,
+                search_videos=_searcher,
+                search_term=search_term,
+                minimum_duration=minimum_duration,
+                video_aspect=video_aspect,
+            )
+
+        added = 0
+        added_duration = 0.0
+        try:
+            batches = _search_terms_in_parallel(
+                search_terms=search_terms,
+                search_videos=search_one,
+                minimum_duration=minimum_duration,
+                video_aspect=video_aspect,
+            )
+        except Exception as exc:
+            logger.warning(
+                "stock provider search failed: "
+                f"provider={provider}, error={type(exc).__name__}"
+            )
+            batches = []
+        for term, items in batches:
+            for item in items or []:
+                url = getattr(item, "url", "")
+                if not url or url in seen:
+                    continue
+                seen.add(url)
+                grouped.setdefault(term, []).append(item)
+                added += 1
+                try:
+                    added_duration += float(item.duration or 0)
+                except (TypeError, ValueError):
+                    continue
+        found_duration += added_duration
+        if not stock_media.should_try_next_provider(
+            found_duration=found_duration,
+            audio_duration=required,
+            added_count=added,
+        ):
+            break
+        if index < len(chain) - 1:
+            logger.info(
+                f"{provider} returned too few stock clips "
+                f"(added={added}, covered={found_duration:.1f}s, "
+                f"required={required:.1f}s); trying the next provider"
+            )
+    return [(term, grouped[term]) for term in search_terms if grouped.get(term)]
+
+
 def _report_material_downloaded(
     position: int,
     total: int,
@@ -2090,9 +2225,9 @@ def _download_materials_in_parallel(
         downloaded = []
         for position, (search_term, item) in enumerate(materials, start=1):
             try:
-                saved_video_path = save_video(
-                    video_url=item.url,
-                    save_dir=material_directory,
+                saved_video_path = _store_downloaded_material(
+                    item,
+                    material_directory,
                 )
             except Exception as exc:
                 logger.error(
@@ -2116,8 +2251,8 @@ def _download_materials_in_parallel(
     ) as executor:
         for search_term, item in materials:
             futures[executor.submit(
-                logging_utils.bind_log_scope(save_video),
-                item.url,
+                logging_utils.bind_log_scope(_store_downloaded_material),
+                item,
                 material_directory,
             )] = (search_term, item)
 
@@ -2184,28 +2319,6 @@ def download_videos(
     文件就以 0~1 的完成比例调用一次，供任务层推进进度条。按需生成的付费
     素材源不报告下载进度。
     """
-    provider = "pexels"
-    remote_search_videos = search_videos_pexels
-    if source == "pixabay":
-        provider = "pixabay"
-        remote_search_videos = search_videos_pixabay
-    elif source == "coverr":
-        provider = "coverr"
-        remote_search_videos = search_videos_coverr
-
-    def search_videos(
-        search_term: str,
-        minimum_duration: int,
-        video_aspect: VideoAspect,
-    ) -> List[MaterialInfo]:
-        return _search_videos_with_cache(
-            provider=provider,
-            search_videos=remote_search_videos,
-            search_term=search_term,
-            minimum_duration=minimum_duration,
-            video_aspect=video_aspect,
-        )
-
     material_directory = config.app.get("material_directory", "").strip()
     if material_directory == "task":
         material_directory = utils.task_dir(task_id)
@@ -2289,7 +2402,7 @@ def download_videos(
         return _download_videos_by_script_order(
             task_id=task_id,
             search_terms=search_terms,
-            search_videos=search_videos,
+            source=source,
             video_aspect=video_aspect,
             audio_duration=audio_duration,
             max_clip_duration=max_clip_duration,
@@ -2300,11 +2413,12 @@ def download_videos(
     valid_video_items = []
     valid_video_urls = []
     found_duration = 0.0
-    for search_term, video_items in _search_terms_in_parallel(
+    for search_term, video_items in _gather_stock_term_groups(
         search_terms=search_terms,
-        search_videos=search_videos,
+        source=source,
         minimum_duration=max_clip_duration,
         video_aspect=video_aspect,
+        audio_duration=audio_duration,
     ):
         for item in video_items:
             if item.url not in valid_video_urls:
@@ -2945,7 +3059,7 @@ def _download_videos_metaso_minimax_on_demand(
 def _download_videos_by_script_order(
     task_id: str,
     search_terms: List[str],
-    search_videos,
+    source: str,
     video_aspect: VideoAspect,
     audio_duration: float,
     max_clip_duration: int,
@@ -2966,11 +3080,12 @@ def _download_videos_by_script_order(
     valid_video_urls = set()
     found_duration = 0.0
 
-    for search_term, video_items in _search_terms_in_parallel(
+    for search_term, video_items in _gather_stock_term_groups(
         search_terms=search_terms,
-        search_videos=search_videos,
+        source=source,
         minimum_duration=max_clip_duration,
         video_aspect=video_aspect,
+        audio_duration=audio_duration,
     ):
         term_items = []
         for item in video_items:

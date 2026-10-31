@@ -30,9 +30,18 @@ LANGUAGES = (
     ("hi", "Hindi"),
 )
 
+FOOTAGE_SOURCES = (
+    ("pixabay", "Pixabay, then CC0 fallbacks"),
+    ("openverse", "Openverse (CC0 / public domain)"),
+    ("wikimedia", "Wikimedia Commons (CC0 / public domain)"),
+    ("pexels", "Pexels"),
+    ("coverr", "Coverr"),
+)
+
 VOICE_NAME_RE_SOURCE = r"^[A-Za-z]{2,3}-[A-Za-z]{2,3}-[A-Za-z0-9]+$"
 
 VALID_ASPECTS = {value for value, _label in ASPECTS}
+VALID_FOOTAGE_SOURCES = {value for value, _label in FOOTAGE_SOURCES}
 VALID_VOICES = {value for value, _label in VOICES}
 VALID_LANGUAGES = {value for value, _label in LANGUAGES}
 

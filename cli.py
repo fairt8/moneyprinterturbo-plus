@@ -41,6 +41,8 @@ _CLI_VIDEO_SOURCES = (
     "pexels",
     "pixabay",
     "coverr",
+    "openverse",
+    "wikimedia",
     "wavespeed",
     "volcengine_seedance",
     "ofox",
@@ -353,7 +355,10 @@ Batch manifests:
         "--video-source",
         default="pexels",
         choices=_CLI_VIDEO_SOURCES,
-        help="video material provider; online providers require matching API keys in config.toml",
+        help=(
+            "video material provider; pexels, pixabay, and coverr need API keys. "
+            "openverse and wikimedia use CC0 and public-domain files without a key"
+        ),
     )
     material_group.add_argument(
         "--video-materials",

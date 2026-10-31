@@ -309,13 +309,16 @@ Secrets belong in `.env` or `config.toml`. See `.env.example` and the `[telegram
 | `WEB_PASSWORD` | Browser access to the Mini App |
 | `API_KEY` | `x-api-key` on `/api/v1` and `/tasks` |
 | `LLM_PROVIDER` plus the matching `*_API_KEY` | Script and search terms |
-| `PEXELS_API_KEYS` or `PIXABAY_API_KEYS` | Stock footage |
+| `PEXELS_API_KEYS` or `PIXABAY_API_KEYS` | Stock footage. Openverse and Wikimedia Commons do not need a key |
 | `YOUTUBE_CLIENT_ID` and `YOUTUBE_CLIENT_SECRET` | YouTube OAuth client |
 | `YOUTUBE_PROJECTS` plus `YOUTUBE_<SLUG>_CLIENT_ID` | Another Cloud project when the default 6 uploads per day are not enough |
 | `TIKTOK_CLIENT_KEY` and `TIKTOK_CLIENT_SECRET` | TikTok Login Kit |
 | `TIKTOK_AUDITED` | `true` only after TikTok approves public direct posts |
 | `PUBLISH_STAGGER_SECONDS` | Delay between each account's upload |
-| `VIDEO_SOURCE` | `pexels` by default |
+| `VIDEO_SOURCE` | Primary provider. Docker defaults to `pixabay` |
+| `VIDEO_SOURCES` | Fallback order. Docker defaults to `pixabay,openverse,wikimedia` |
+| `OPENVERSE_CLIENT_ID` and `OPENVERSE_CLIENT_SECRET` | Optional. Anonymous Openverse requests still work |
+| `TELEGRAM_ENABLED` | `true` by default. `false` keeps the bot idle even when a token is set |
 | `TELEGRAM_ALLOWED_USER_IDS` | Optional allowlist |
 | `FFMPEG_PATH`, `IMAGEMAGICK_PATH` | Only when they are not on `PATH` |
 | `TASK_RETENTION_HOURS` | Delete finished task folders. `0` keeps them |

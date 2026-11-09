@@ -90,7 +90,7 @@ def settings() -> dict[str, Any]:
         "aspect": _env("AUTO_SCHEDULE_ASPECT", "9:16"),
         "auto_publish": _flag("AUTO_PUBLISH_ENABLED", False),
         "publish_privacy": _env("AUTO_PUBLISH_PRIVACY", "public"),
-        "grace_hours": float(_env("AUTO_SCHEDULE_GRACE_HOURS", "3") or 3),
+        "grace_hours": float(_env("AUTO_SCHEDULE_GRACE_HOURS", "0.5") or 0.5),
     }
 
 

@@ -50,7 +50,8 @@ DEFAULT_IMAGE_MODELS = (
 )
 DEFAULT_STYLE = (
     "photorealistic, cinematic lighting, shallow depth of field, rich color, "
-    "high detail, vertical composition, no text, no letters, no watermark, no logo"
+    "high detail, main subject centred in frame, no text, no words, no letters, "
+    "no numbers, no watermark, no logo"
 )
 _SCENE_TARGET_SECONDS = 4.5
 _CROSSFADE_SECONDS = 0.45
@@ -116,12 +117,18 @@ def _api_key() -> str:
 
 
 def is_enabled() -> bool:
-    return bool(_api_key()) or _free_fallback_enabled()
+    return bool(_api_key()) or bool(_cloudflare_endpoint()[0]) or _free_fallback_enabled()
 
 
 def _free_fallback_enabled() -> bool:
-    value = _cfg("ai_image_free_fallback", os.environ.get("AI_IMAGE_FREE_FALLBACK", "true"))
+    value = _cfg("ai_image_free_fallback", os.environ.get("AI_IMAGE_FREE_FALLBACK", "false"))
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _cloudflare_endpoint() -> tuple[str, str]:
+    url = str(_cfg("cf_image_url", os.environ.get("CF_IMAGE_URL", ""))).strip()
+    key = str(_cfg("cf_image_key", os.environ.get("CF_IMAGE_KEY", ""))).strip()
+    return (url, key) if url and key else ("", "")
 
 
 def _image_models() -> list[str]:
@@ -364,7 +371,34 @@ def _pollinations_image(prompt: str, aspect: VideoAspect) -> bytes | None:
     return None
 
 
-def _save_image(data: bytes, path: str, crop_bottom: float = 0.0) -> bool:
+def _cloudflare_image(prompt: str) -> bytes | None:
+    """Workers AI (FLUX.1 schnell) through the project's own Worker. Square output."""
+
+    url, key = _cloudflare_endpoint()
+    if not url:
+        return None
+    for attempt in range(3):
+        try:
+            response = requests.post(
+                url,
+                headers={"x-image-key": key, "Content-Type": "application/json"},
+                json={"prompt": prompt[:1900], "steps": 6},
+                timeout=90,
+            )
+            if response.status_code == 200 and response.headers.get("content-type", "").startswith("image/"):
+                return response.content
+            logger.warning(f"workers ai image HTTP {response.status_code}: {response.text[:160]}")
+            if response.status_code in (400, 401, 403):
+                return None
+        except requests.RequestException as exc:
+            logger.warning(f"workers ai image error: {type(exc).__name__}")
+        time.sleep(3 + attempt * 4)
+    return None
+
+
+def _save_image(
+    data: bytes, path: str, crop_bottom: float = 0.0, aspect: VideoAspect | None = None
+) -> bool:
     try:
         with Image.open(io.BytesIO(data)) as image:
             image.load()
@@ -372,6 +406,19 @@ def _save_image(data: bytes, path: str, crop_bottom: float = 0.0) -> bool:
             if crop_bottom > 0:
                 w, h = image.size
                 image = image.crop((0, 0, w, int(h * (1 - crop_bottom))))
+            if aspect is not None:
+                # Square models: centre-crop to the video frame before the
+                # Ken Burns pass so nothing is letterboxed or stretched.
+                tw, th = aspect.to_resolution()
+                w, h = image.size
+                target = tw / th
+                if abs(w / h - target) > 0.02:
+                    if w / h > target:
+                        nw = int(h * target)
+                        image = image.crop(((w - nw) // 2, 0, (w - nw) // 2 + nw, h))
+                    else:
+                        nh = int(w / target)
+                        image = image.crop((0, (h - nh) // 2, w, (h - nh) // 2 + nh))
             image.save(path, format="JPEG", quality=93)
         return True
     except Exception as exc:
@@ -387,12 +434,16 @@ def generate_image(prompt: str, aspect: VideoAspect, path: str) -> str:
             if _is_dead(model):
                 continue
             data = _google_image(model, prompt, aspect)
-            if data and _save_image(data, path):
+            if data and _save_image(data, path, aspect=aspect):
                 return f"google:{model}"
+    if _cloudflare_endpoint()[0]:
+        data = _cloudflare_image(prompt)
+        if data and _save_image(data, path, aspect=aspect):
+            return "cloudflare:flux-1-schnell"
     if _free_fallback_enabled():
         data = _pollinations_image(prompt, aspect)
         # Pollinations stamps a small mark in the bottom corner; trim it.
-        if data and _save_image(data, path, crop_bottom=0.045):
+        if data and _save_image(data, path, crop_bottom=0.045, aspect=aspect):
             return "pollinations:flux"
     return ""
 

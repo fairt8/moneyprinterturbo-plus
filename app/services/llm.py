@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from time import perf_counter
 from typing import List
 
@@ -311,6 +312,7 @@ def _extract_qwen_generation_text(response) -> str:
     return _normalize_text_response(text, "qwen")
 
 
+_primary_down_until = 0.0
 _GEMINI_TEXT_FALLBACK_MODELS = ("gemini-flash-lite-latest", "gemini-3.5-flash-lite", "gemini-flash-latest")
 
 
@@ -354,15 +356,27 @@ def _generate_response(
     request_timeout: float | None = None,
     max_retries: int | None = None,
 ) -> str:
-    """Call the configured LLM; if it errors, try Gemini so unattended runs continue."""
+    """Call the configured LLM; if it errors, try Gemini so unattended runs continue.
 
+    After a failure the primary LLM is skipped for a few minutes, because a
+    down relay can take more than a minute per call before it errors.
+    """
+
+    global _primary_down_until
+    if time.time() < _primary_down_until:
+        fallback = _gemini_text_fallback(prompt)
+        if fallback:
+            return fallback
     result = _generate_response_primary(
         prompt, app_config=app_config, request_timeout=request_timeout, max_retries=max_retries
     )
     if isinstance(result, str) and result.startswith("Error: "):
+        _primary_down_until = time.time() + 300
         fallback = _gemini_text_fallback(prompt)
         if fallback:
             return fallback
+    else:
+        _primary_down_until = 0.0
     return result
 
 

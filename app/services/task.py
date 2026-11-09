@@ -403,6 +403,15 @@ def generate_terms(task_id, params, video_script):
 
         logger.debug(f"video terms: {utils.to_json(video_terms)}")
 
+    if not video_terms and not params.video_terms:
+        # Search terms only steer stock footage. When the LLM is unavailable,
+        # words from the topic are a usable stand-in, so the video still ships.
+        words = [w for w in re.findall(r"[A-Za-z][A-Za-z']{3,}", params.video_subject or "")]
+        video_terms = list(dict.fromkeys([params.video_subject.strip()[:80]] + words[:4]))
+        video_terms = [term for term in video_terms if term]
+        if video_terms:
+            logger.warning(f"using topic words as search terms: {video_terms}")
+
     if not video_terms:
         _mark_task_failed(
             task_id,

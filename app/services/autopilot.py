@@ -409,7 +409,7 @@ def produce(item: dict, conf: dict) -> dict:
     except (OSError, ValueError):
         pass
     try:
-        meta = llm.generate_social_metadata(video_subject=topic, video_script=script, platform="youtube")
+        meta = llm.generate_social_metadata(video_subject=topic, video_script=script, platform="tiktok")
     except Exception:
         meta = {"title": topic, "caption": "", "hashtags": ["#money", "#personalfinance", "#shorts"]}
     with open(os.path.join(utils.task_dir(task_id), "autopilot.json"), "w", encoding="utf-8") as handle:
@@ -471,8 +471,9 @@ def _loop() -> None:
             item = None
             with _STATE_LOCK:
                 data = _load()
-                if data["pending"]:
-                    item = data["pending"][0]
+                ready = [p for p in data["pending"] if float(p.get("not_before") or 0) <= time.time()]
+                if ready:
+                    item = ready[0]
             if item:
                 record = {"id": item["id"], "topic": item.get("topic", ""), "reason": item.get("reason")}
                 try:
@@ -483,7 +484,20 @@ def _loop() -> None:
                     record["status"] = "failed"
                     record["error"] = str(exc)[:300]
                     record["topic"] = _current.get("topic") or record["topic"]
-                    if conf["chat_id"]:
+                    retry = int(item.get("attempt") or 0) < 1
+                    if retry:
+                        # One automatic retry ten minutes later, same topic.
+                        with _STATE_LOCK:
+                            data = _load()
+                            data["pending"].append({
+                                **item,
+                                "id": item["id"] + "r",
+                                "topic": record["topic"],
+                                "attempt": int(item.get("attempt") or 0) + 1,
+                                "not_before": time.time() + 600,
+                            })
+                            _save(data)
+                    if conf["chat_id"] and not retry:
                         try:
                             _tg("sendMessage", data={
                                 "chat_id": conf["chat_id"],

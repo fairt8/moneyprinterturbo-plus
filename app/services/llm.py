@@ -311,7 +311,62 @@ def _extract_qwen_generation_text(response) -> str:
     return _normalize_text_response(text, "qwen")
 
 
+_GEMINI_TEXT_FALLBACK_MODELS = ("gemini-flash-lite-latest", "gemini-3.5-flash-lite", "gemini-flash-latest")
+
+
+def _gemini_text_fallback(prompt: str) -> str:
+    """Answer with Gemini when the configured LLM is down. Returns '' on failure."""
+
+    enabled = str(
+        config.app.get("llm_gemini_fallback", os.environ.get("LLM_GEMINI_FALLBACK", "true"))
+    ).strip().lower() in {"1", "true", "yes", "on"}
+    api_key = str(config.app.get("gemini_api_key") or os.environ.get("GEMINI_API_KEY", "")).strip()
+    if not enabled or not api_key:
+        return ""
+    import requests
+
+    raw = config.app.get("llm_gemini_fallback_models") or os.environ.get("LLM_GEMINI_FALLBACK_MODELS", "")
+    models = [m.strip() for m in str(raw).split(",") if m.strip()] or list(_GEMINI_TEXT_FALLBACK_MODELS)
+    for model in models:
+        try:
+            response = requests.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
+                json={"contents": [{"parts": [{"text": prompt}]}]},
+                timeout=90,
+            )
+            if response.status_code != 200:
+                logger.warning(f"Gemini text fallback {model}: HTTP {response.status_code}")
+                continue
+            parts = response.json()["candidates"][0]["content"]["parts"]
+            text = "".join(str(part.get("text") or "") for part in parts).strip()
+            if text:
+                logger.info(f"LLM answered by Gemini fallback model {model}")
+                return text
+        except Exception as exc:
+            logger.warning(f"Gemini text fallback {model} failed: {type(exc).__name__}")
+    return ""
+
+
 def _generate_response(
+    prompt: str,
+    app_config=None,
+    request_timeout: float | None = None,
+    max_retries: int | None = None,
+) -> str:
+    """Call the configured LLM; if it errors, try Gemini so unattended runs continue."""
+
+    result = _generate_response_primary(
+        prompt, app_config=app_config, request_timeout=request_timeout, max_retries=max_retries
+    )
+    if isinstance(result, str) and result.startswith("Error: "):
+        fallback = _gemini_text_fallback(prompt)
+        if fallback:
+            return fallback
+    return result
+
+
+def _generate_response_primary(
     prompt: str,
     app_config=None,
     request_timeout: float | None = None,
@@ -801,7 +856,7 @@ def test_connection() -> tuple[bool, str, float]:
     成功状态、错误信息和请求耗时。
     """
     started_at = perf_counter()
-    response = _generate_response(
+    response = _generate_response_primary(
         prompt="Reply with exactly: OK",
         request_timeout=LLM_CONNECTION_TEST_TIMEOUT_SECONDS,
         max_retries=LLM_CONNECTION_TEST_MAX_RETRIES,

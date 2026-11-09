@@ -1957,14 +1957,41 @@ def gemini_tts(
             ),
         )
 
-        # google-genai 使用统一 Client 调用文本和 TTS 模型。上下文管理器确保
-        # 请求结束后释放 HTTP 连接，同时保留原有 PCM 转码和字幕时间轴逻辑。
+        # Each TTS model has its own free-tier quota, so try the configured
+        # models in order and only give up when every one refuses.
+        configured_models = config.app.get("gemini_tts_models") or os.environ.get(
+            "GEMINI_TTS_MODELS", ""
+        )
+        if isinstance(configured_models, str):
+            tts_models = [m.strip() for m in configured_models.split(",") if m.strip()]
+        else:
+            tts_models = [str(m).strip() for m in configured_models if str(m).strip()]
+        if not tts_models:
+            tts_models = [
+                "gemini-2.5-flash-preview-tts",
+                "gemini-3.1-flash-tts-preview",
+                "gemini-2.5-pro-preview-tts",
+            ]
+        response = None
+        last_error = None
         with genai.Client(api_key=api_key) as client:
-            response = client.models.generate_content(
-                model="gemini-2.5-flash-preview-tts",
-                contents=text,
-                config=generation_config,
-            )
+            for tts_model in tts_models:
+                try:
+                    response = client.models.generate_content(
+                        model=tts_model,
+                        contents=text,
+                        config=generation_config,
+                    )
+                    logger.info(f"Gemini TTS model used: {tts_model}")
+                    break
+                except Exception as model_error:
+                    last_error = model_error
+                    logger.warning(
+                        f"Gemini TTS model {tts_model} failed: "
+                        f"{type(model_error).__name__}: {str(model_error)[:200]}"
+                    )
+        if response is None:
+            raise RuntimeError(f"every Gemini TTS model failed: {last_error}")
 
         # 检查响应
         if not response.candidates or not response.candidates[0].content:
@@ -1973,9 +2000,11 @@ def gemini_tts(
             
         # 获取音频数据
         audio_data = None
+        audio_mime = ""
         for part in response.candidates[0].content.parts:
             if hasattr(part, 'inline_data') and part.inline_data:
                 audio_data = part.inline_data.data
+                audio_mime = str(getattr(part.inline_data, "mime_type", "") or "").lower()
                 break
                 
         if not audio_data:
@@ -1995,13 +2024,16 @@ def gemini_tts(
         
         # Gemini返回Linear PCM格式，按照文档参数解析
         try:
-            audio_segment = AudioSegment.from_file(
-                io.BytesIO(audio_bytes), 
-                format="raw",
-                frame_rate=24000,  # Gemini TTS默认采样率
-                channels=1,        # 单声道
-                sample_width=2     # 16-bit
-            )
+            if "wav" in audio_mime or audio_bytes[:4] == b"RIFF":
+                audio_segment = AudioSegment.from_file(io.BytesIO(audio_bytes), format="wav")
+            else:
+                audio_segment = AudioSegment.from_file(
+                    io.BytesIO(audio_bytes),
+                    format="raw",
+                    frame_rate=24000,  # Gemini TTS默认采样率
+                    channels=1,        # 单声道
+                    sample_width=2     # 16-bit
+                )
         except Exception as e:
             logger.error(f"Failed to load PCM audio: {e}")
             return None

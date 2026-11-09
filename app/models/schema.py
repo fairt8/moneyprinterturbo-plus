@@ -125,7 +125,7 @@ class VideoParams(BaseModel):
     match_materials_to_script: bool = False
     video_count: int = Field(default=1, ge=1)
 
-    video_source: Optional[str] = "pexels"
+    video_source: Optional[str] = "gemini_image"
     video_materials: Optional[List[MaterialInfo]] = (
         None  # Materials used to generate the video
     )
@@ -140,7 +140,7 @@ class VideoParams(BaseModel):
     voice_rate: Optional[float] = Field(default=1.0, allow_inf_nan=False)
     bgm_type: Optional[str] = "random"
     bgm_file: Optional[str] = ""
-    bgm_volume: Optional[float] = Field(default=0.2, allow_inf_nan=False)
+    bgm_volume: Optional[float] = Field(default=0.12, allow_inf_nan=False)
     # 视频配乐供应商共用提示词，WebUI 新任务统一写入该字段。保留下面的
     # Sonilo 专用字段以兼容旧任务记录和现有 CLI 参数。
     video_music_prompt: str = Field(default="", max_length=2000)
@@ -148,7 +148,7 @@ class VideoParams(BaseModel):
 
     subtitle_enabled: Optional[bool] = True
     subtitle_position: Optional[str] = config.ui.get(
-        "subtitle_position", "bottom"
+        "subtitle_position", "custom"
     )  # top, bottom, center, custom, two_thirds_bottom
     subtitle_display_mode: SubtitleDisplayMode = _get_valid_ui_choice(
         "subtitle_display_mode", _SUBTITLE_DISPLAY_MODES, "sentence"
@@ -157,16 +157,16 @@ class VideoParams(BaseModel):
         "subtitle_animation", _SUBTITLE_ANIMATIONS, "none"
     )
     custom_position: float = Field(
-        default=config.ui.get("custom_position", 70.0), ge=0, le=100, allow_inf_nan=False
+        default=config.ui.get("custom_position", 72.0), ge=0, le=100, allow_inf_nan=False
     )
-    font_name: Optional[str] = "STHeitiMedium.ttc"
+    font_name: Optional[str] = "MicrosoftYaHeiBold.ttc"
     text_fore_color: Optional[str] = "#FFFFFF"
     text_background_color: Union[bool, str] = False
     rounded_subtitle_background: bool = False
 
-    font_size: int = Field(default=60, ge=1)
+    font_size: int = Field(default=66, ge=1)
     stroke_color: Optional[str] = "#000000"
-    stroke_width: float = Field(default=1.5, ge=0, allow_inf_nan=False)
+    stroke_width: float = Field(default=3.5, ge=0, allow_inf_nan=False)
     n_threads: Optional[int] = 2
     paragraph_number: int = Field(default=1, ge=1, le=10)
     video_script_prompt: str = Field(default="", max_length=2000)

@@ -7,6 +7,11 @@ ASPECTS = (
 )
 
 VOICES = (
+    ("gemini:Charon-Informative", "Gemini, Charon (calm narrator)"),
+    ("gemini:Puck-Upbeat", "Gemini, Puck (upbeat)"),
+    ("gemini:Kore-Firm", "Gemini, Kore (firm)"),
+    ("gemini:Fenrir-Excitable", "Gemini, Fenrir (energetic)"),
+    ("gemini:Aoede-Breezy", "Gemini, Aoede (breezy)"),
     ("en-US-AriaNeural", "English, Aria"),
     ("en-US-GuyNeural", "English, Guy"),
     ("en-GB-SoniaNeural", "English UK, Sonia"),
@@ -31,6 +36,7 @@ LANGUAGES = (
 )
 
 FOOTAGE_SOURCES = (
+    ("gemini_image", "AI images (Gemini), stock as fallback"),
     ("pixabay", "Pixabay, then CC0 fallbacks"),
     ("openverse", "Openverse (CC0 / public domain)"),
     ("wikimedia", "Wikimedia Commons (CC0 / public domain)"),
@@ -38,7 +44,9 @@ FOOTAGE_SOURCES = (
     ("coverr", "Coverr"),
 )
 
-VOICE_NAME_RE_SOURCE = r"^[A-Za-z]{2,3}-[A-Za-z]{2,3}-[A-Za-z0-9]+$"
+VOICE_NAME_RE_SOURCE = (
+    r"^(?:[A-Za-z]{2,3}-[A-Za-z]{2,3}-[A-Za-z0-9]+|gemini:[A-Za-z]+(?:-[A-Za-z]+)?)$"
+)
 
 VALID_ASPECTS = {value for value, _label in ASPECTS}
 VALID_FOOTAGE_SOURCES = {value for value, _label in FOOTAGE_SOURCES}

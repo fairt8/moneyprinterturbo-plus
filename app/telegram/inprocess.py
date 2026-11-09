@@ -40,7 +40,7 @@ class InProcessPipeline:
                 paragraph_number=options.paragraphs,
                 video_language=options.language or "",
                 subtitle_enabled=options.subtitles,
-                video_source=options.video_source or "pexels",
+                video_source=options.video_source or "gemini_image",
             )
             result = create_task(_local_request(), body, stop_at="video")
         except HttpException as exc:

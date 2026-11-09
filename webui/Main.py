@@ -141,7 +141,7 @@ VIDEO_SOURCE_GROUPS = {
         "wavespeed",
         "muapi",
     ),
-    "ai_image": ("openai_image",),
+    "ai_image": ("gemini_image", "openai_image"),
     "local": ("local",),
 }
 # Upload-Post 的 API Key 与发布用户分别在两个页面管理，并且发布用户名称
@@ -5274,10 +5274,11 @@ def _render_video_settings(panel, params):
                 "muapi": tr("MuAPI AI Video"),
                 "loomloom": tr("Shengsuan Cloud AI Video"),
                 "openai_image": tr("OpenAI Compatible Text-to-Image"),
+                "gemini_image": "AI images (Gemini) + Ken Burns, stock fallback",
                 "local": tr("Local file"),
             }
             saved_video_source_name = str(
-                config.app.get("video_source", "pexels") or "pexels"
+                config.app.get("video_source", "gemini_image") or "gemini_image"
             )
             params.video_source = grouped_selectbox(
                 tr("Video Source"),
@@ -8137,6 +8138,7 @@ def _render_generation_controls(
             "muapi",
             "loomloom",
             "openai_image",
+            "gemini_image",
             "local",
         ]:
             _remove_active_generation_task(task_id)

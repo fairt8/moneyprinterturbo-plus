@@ -58,6 +58,12 @@ async def application_lifespan(_: FastAPI):
 
     start_publish_worker()
     try:
+        from app.services import autopilot
+
+        autopilot.start()
+    except Exception as exc:
+        logger.warning(f"autopilot worker was not started: {exc}")
+    try:
         register_integration(load_telegram_settings())
     except Exception as exc:
         logger.warning(f"Telegram setup was skipped: {exc}")

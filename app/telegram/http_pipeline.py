@@ -44,6 +44,7 @@ class HttpPipeline:
             "paragraph_number": options.paragraphs,
             "video_language": options.language,
             "subtitle_enabled": options.subtitles,
+            "video_source": options.video_source or "gemini_image",
         }
         response = self._request(
             "POST",

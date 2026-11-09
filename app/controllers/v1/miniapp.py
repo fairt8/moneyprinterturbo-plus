@@ -107,7 +107,7 @@ def miniapp_bootstrap(request: Request):
                 "subtitle_enabled": settings.default_subtitles,
                 "video_source": settings.video_source
                 if settings.video_source in VALID_FOOTAGE_SOURCES
-                else "pixabay",
+                else "gemini_image",
             },
         },
     }
@@ -147,7 +147,7 @@ def create_miniapp_video(request: Request, body: dict = Body(...)):
         raise HttpException(
             task_id="",
             status_code=400,
-            message="Voice names look like en-US-AriaNeural.",
+            message="Voice names look like en-US-AriaNeural or gemini:Charon.",
         )
 
     try:
@@ -167,14 +167,14 @@ def create_miniapp_video(request: Request, body: dict = Body(...)):
 
     requested_source = body.get("video_source")
     if requested_source is None or str(requested_source).strip() == "":
-        video_source = settings.video_source or "pixabay"
+        video_source = settings.video_source or "gemini_image"
     else:
         video_source = str(requested_source).strip()
         if video_source not in VALID_FOOTAGE_SOURCES:
             raise HttpException(
                 task_id="",
                 status_code=400,
-                message="Choose Pixabay, Openverse, Wikimedia Commons, Pexels, or Coverr.",
+                message="Choose AI images, Pixabay, Openverse, Wikimedia Commons, Pexels, or Coverr.",
             )
 
     options = JobOptions(

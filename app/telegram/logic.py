@@ -32,11 +32,11 @@ class PipelineError(Exception):
 @dataclass
 class JobOptions:
     aspect: str = "9:16"
-    voice: str = "en-US-AriaNeural"
+    voice: str = "gemini:Charon-Informative"
     paragraphs: int = 1
     language: str = ""
     subtitles: bool = True
-    video_source: str = "pexels"
+    video_source: str = "gemini_image"
 
 
 @dataclass
@@ -76,13 +76,13 @@ class Conversation:
             "aspect": self.settings.default_aspect
             if self.settings.default_aspect in VALID_ASPECTS
             else "9:16",
-            "voice": self.settings.default_voice or "en-US-AriaNeural",
+            "voice": self.settings.default_voice or "gemini:Charon-Informative",
             "paragraphs": self.settings.default_paragraphs,
             "language": self.settings.default_language
             if self.settings.default_language in VALID_LANGUAGES
             else "",
             "subtitles": self.settings.default_subtitles,
-            "video_source": self.settings.video_source or "pixabay",
+            "video_source": self.settings.video_source or "gemini_image",
             "topic": "",
             "task_id": "",
             "awaiting": "",
@@ -93,8 +93,8 @@ class Conversation:
         if blocked:
             return blocked
         return Reply(
-            "Send a topic and I'll write a script, record a voiceover, pull stock "
-            "footage, and send the short video back here.\n\n"
+            "Send a topic and I'll write a script, record a voiceover, draw AI "
+            "scenes (stock footage if that fails), and send the short video back here.\n\n"
             "Commands: /new topic, /settings, /status, /help.",
             buttons=self._start_buttons(),
         )
@@ -189,8 +189,8 @@ class Conversation:
         if session.get("awaiting") == "voice":
             if not _VOICE_RE.match(body) or len(body) > 80:
                 return Reply(
-                    "Voice names look like en-US-AriaNeural. Send one Edge TTS voice name, "
-                    "or press a voice button."
+                    "Voice names look like en-US-AriaNeural (Edge) or gemini:Charon. "
+                    "Send one voice name, or press a voice button."
                 )
             session["voice"] = body
             session["awaiting"] = ""
@@ -230,7 +230,7 @@ class Conversation:
         if data == "voice-custom":
             session["awaiting"] = "voice"
             self.sessions.save(user_id, session)
-            return Reply("Send an Edge TTS voice name, for example en-US-JennyNeural.")
+            return Reply("Send a voice name, for example en-US-JennyNeural or gemini:Kore.")
         if data == "paras":
             choices = tuple((str(n), f"{n} paragraph" if n == 1 else f"{n} paragraphs") for n in range(1, 5))
             return Reply("How long should the script be?", buttons=self._choice_buttons("p", choices))
@@ -239,9 +239,10 @@ class Conversation:
             return Reply("Which language should the script use?", buttons=self._choice_buttons("l", labeled))
         if data == "footage":
             return Reply(
-                "Choose stock footage. Pixabay is the usual primary source. "
+                "Choose the visuals. AI images are drawn for each scene and slowly "
+                "animated; if image generation fails, Pixabay stock is used instead. "
                 "Openverse and Wikimedia Commons add CC0 and public-domain files "
-                "when an earlier source comes up short.",
+                "when an earlier stock source comes up short.",
                 buttons=self._choice_buttons("src", FOOTAGE_SOURCES),
             )
         if data == "subs":

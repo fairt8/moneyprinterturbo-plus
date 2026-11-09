@@ -67,11 +67,11 @@ class TelegramSettings:
     api_base_url: str = "http://127.0.0.1:8080"
     api_key: str = ""
     default_aspect: str = "9:16"
-    default_voice: str = "en-US-AriaNeural"
+    default_voice: str = "gemini:Charon-Informative"
     default_paragraphs: int = 1
     default_language: str = ""
     default_subtitles: bool = True
-    video_source: str = "pexels"
+    video_source: str = "gemini_image"
     enabled: bool = False
     admin_user_ids: frozenset[int] = frozenset()
 
@@ -194,12 +194,12 @@ def load_telegram_settings() -> TelegramSettings:
         if isinstance(app.get("api_key"), str)
         else "",
         default_aspect=str(section.get("default_aspect") or "9:16").strip() or "9:16",
-        default_voice=str(section.get("default_voice") or "en-US-AriaNeural").strip()
-        or "en-US-AriaNeural",
+        default_voice=str(section.get("default_voice") or "gemini:Charon-Informative").strip()
+        or "gemini:Charon-Informative",
         default_paragraphs=paragraphs,
         default_language=str(section.get("default_language") or "").strip(),
         default_subtitles=_bool(section.get("default_subtitles", True), True),
-        video_source=str(app.get("video_source") or "pexels").strip() or "pexels",
+        video_source=str(app.get("video_source") or "gemini_image").strip() or "gemini_image",
         enabled=enabled,
         admin_user_ids=_ids(section.get("admin_user_ids", [])),
     )

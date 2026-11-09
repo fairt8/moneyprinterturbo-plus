@@ -98,7 +98,7 @@ _VIDEO_MUSIC_PROVIDERS = {
 _SUPPORTED_VIDEO_SOURCES = frozenset({
     "pexels", "pixabay", "coverr", "openverse", "wikimedia", "local", "wavespeed",
     "volcengine_seedance", "ofox", "metaso_minimax", "muapi",
-    "loomloom", "openai_image",
+    "loomloom", "openai_image", "gemini_image",
 })
 
 
@@ -612,6 +612,26 @@ def generate_audio(
             tts_kwargs["voxcpm_prompt_audio"] = voxcpm_prompt_audio
             tts_kwargs["voxcpm_prompt_text"] = voxcpm_prompt_text
         sub_maker = voice.tts(**tts_kwargs)
+        if sub_maker is None and not voice.is_azure_v1_voice(tts_kwargs["voice_name"]):
+            # Paid or quota-limited voices (Gemini, ElevenLabs, ...) must not
+            # stop an unattended run. Edge TTS needs no key, so fall back to it.
+            fallback_voice = str(
+                config.app.get("tts_fallback_voice") or "en-US-AndrewNeural"
+            ).strip()
+            logger.warning(
+                f"TTS failed for {tts_kwargs['voice_name']!r}; "
+                f"falling back to Edge voice {fallback_voice!r}"
+            )
+            tts_kwargs["voice_name"] = voice.parse_voice_name(fallback_voice)
+            for extra in ("voxcpm_reference_audio", "voxcpm_prompt_audio", "voxcpm_prompt_text"):
+                tts_kwargs.pop(extra, None)
+            sub_maker = voice.tts(**tts_kwargs)
+            if sub_maker is not None:
+                task_artifacts.patch_script_data(
+                    task_id, tts_fallback={"requested": params.voice_name, "used": fallback_voice}
+                )
+        elif sub_maker is not None:
+            task_artifacts.patch_script_data(task_id, tts_voice_used=params.voice_name)
         if sub_maker is None:
             _mark_task_failed(
                 task_id,
@@ -721,13 +741,57 @@ def generate_subtitle(task_id, params, video_script, sub_maker, audio_file):
         return final_subtitle_path
 
 
+def _build_ai_visuals(task_id, params, video_script, audio_duration):
+    """Return [mp4] of animated AI stills, or None so the caller uses stock."""
+    from app.services import gemini_media
+
+    if not gemini_media.is_enabled():
+        logger.warning("gemini_image needs GEMINI_API_KEY or the free image fallback")
+        return None
+    logger.info("\n\n## generating AI scene images")
+    try:
+        result = gemini_media.build_ai_visuals(
+            task_id=task_id,
+            subject=params.video_subject,
+            script=video_script or params.video_script or params.video_subject,
+            audio_duration=float(audio_duration),
+            aspect=params.video_aspect,
+            progress=_stage_progress_reporter(task_id, 40, 50),
+        )
+    except Exception as exc:
+        logger.warning(f"AI visuals failed: {type(exc).__name__}: {str(exc)[:300]}")
+        task_artifacts.patch_script_data(
+            task_id, ai_visuals={"video_source": "gemini_image", "error": str(exc)[:300]}
+        )
+        return None
+    task_artifacts.patch_script_data(task_id, ai_visuals=result.summary())
+    # The track already has its own pacing, camera moves and crossfades.
+    # Use it whole: no extra cuts, shuffling or per-clip transitions.
+    params.video_concat_mode = VideoConcatMode.sequential
+    params.match_materials_to_script = False
+    params.video_transition_mode = None
+    params.video_clip_speed = 1.0
+    params.video_clip_duration = int(math.ceil(float(audio_duration))) + 5
+    return [result.video_path]
+
+
 def get_video_materials(
     task_id,
     params,
     video_terms,
     audio_duration,
     loomloom_video_request: loomloom.LoomLoomConfirmedVideoRequest | None = None,
+    video_script: str = "",
 ):
+    if params.video_source == "gemini_image":
+        ai_result = _build_ai_visuals(task_id, params, video_script, audio_duration)
+        if ai_result:
+            return ai_result
+        fallback_source = str(
+            config.app.get("ai_image_fallback_source") or "pixabay"
+        ).strip() or "pixabay"
+        logger.warning(f"AI visuals unavailable; falling back to {fallback_source}")
+        params.video_source = fallback_source
     if params.video_source == "local":
         logger.info("\n\n## preprocess local materials")
         materials = video.preprocess_video(
@@ -1786,6 +1850,7 @@ def _run_pipeline(
         video_terms,
         audio_duration,
         loomloom_video_request=loomloom_video_request,
+        video_script=video_script,
     )
     if not downloaded_videos:
         material_hint = ""

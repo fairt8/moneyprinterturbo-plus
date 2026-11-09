@@ -145,13 +145,13 @@
           <select id="language"></select>
         </div>
       </div>
-      <label for="custom-voice">Or type an Edge voice name</label>
+      <label for="custom-voice">Or type a voice name (Edge or gemini:Name)</label>
       <input id="custom-voice" placeholder="en-US-JennyNeural" />
       <label for="paragraphs">Script length: <span id="paragraph-label">1 paragraph</span></label>
       <input id="paragraphs" type="range" min="1" max="4" value="1" />
-      <label for="footage">Footage</label>
+      <label for="footage">Visuals</label>
       <select id="footage"></select>
-      <p class="credit">Pixabay is the usual primary source. Openverse and Wikimedia Commons add CC0 and public-domain clips when an earlier source comes up short. Unsplash is not used.</p>
+      <p class="credit">AI images are drawn for every scene and slowly animated; Pixabay stock steps in if image generation fails. Openverse and Wikimedia Commons add CC0 and public-domain clips when an earlier source comes up short. Unsplash is not used.</p>
       <label class="check"><input id="subtitles" type="checkbox" checked /> Burn subtitles into the video</label>
       <label class="check"><input id="auto-publish" type="checkbox" /> After it finishes, publish to the default target</label>
       <p class="credit"><a href="/accounts">Manage YouTube channels and TikTok accounts</a></p>
@@ -263,7 +263,7 @@
       state.authRequired = Boolean(data.auth_required);
       const defaults = data.defaults || {};
       renderAspects(data.aspects || [], defaults.video_aspect || "9:16");
-      fillSelect($("footage"), data.sources || [], defaults.video_source || "pixabay");
+      fillSelect($("footage"), data.sources || [], defaults.video_source || "gemini_image");
       fillSelect($("voice"), data.voices || [], defaults.voice_name || "");
       fillSelect($("language"), data.languages || [], defaults.video_language || "");
       $("paragraphs").value = String(defaults.paragraph_number || 1);
@@ -313,7 +313,7 @@
             paragraph_number: Number($("paragraphs").value || 1),
             video_language: $("language").value,
             subtitle_enabled: $("subtitles").checked,
-            video_source: $("footage").value || "pixabay",
+            video_source: $("footage").value || "gemini_image",
           }),
         });
         const body = await response.json().catch(() => ({}));

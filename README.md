@@ -337,6 +337,6 @@ pytest test/services/test_telegram_flow.py test/services/test_reliability.py \
 The Mini App tests replace the render pipeline with a fake, so they do not call a paid API. A full render still needs your own keys and network access to the providers you select.
 
 ## Guides
-- [Projects and templates guide](docs/PROJECTS_GUIDE.md)
+- [Projects and templates guide](docs/PROJECTS_GUIDE.md) (download: [PDF](docs/MoneyPrinter-YT-Guide.pdf), [Markdown](docs/MoneyPrinter-YT-Guide.md))
 - [Video app operator guide](docs/VIDEO_APP_GUIDE.md)
 - [Free AI clips (HunyuanVideo/Wan on Kaggle)](hunyuan/README.md)

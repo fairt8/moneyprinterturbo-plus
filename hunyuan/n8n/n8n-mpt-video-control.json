@@ -1,0 +1,528 @@
+{
+  "name": "MPT Video App Control",
+  "nodes": [
+    {
+      "id": "4748baa3-42ca-473b-b8a8-d23bc147228b",
+      "name": "Video App Control Form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.6,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "authentication": "basicAuth",
+        "formTitle": "MoneyPrinter Video App Control",
+        "formDescription": "Free Kaggle GPU clips for MoneyPrinter. One action per submit. The batch kernel is shared with YouTube Auto (30 GPU h/week).",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Action",
+              "fieldType": "dropdown",
+              "requiredField": true,
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Status and quota"
+                  },
+                  {
+                    "option": "Run GPU batch now"
+                  },
+                  {
+                    "option": "Run HunyuanVideo selftest"
+                  },
+                  {
+                    "option": "Get selftest result"
+                  },
+                  {
+                    "option": "Queue a test clip"
+                  }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "Test prompt",
+              "fieldType": "textarea",
+              "placeholder": "Only for Queue a test clip"
+            },
+            {
+              "fieldLabel": "Model",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "wan21-diffusers"
+                  },
+                  {
+                    "option": "ltx-t2v"
+                  },
+                  {
+                    "option": "wan22-5b-diffusers"
+                  },
+                  {
+                    "option": "hy15-t2v"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "options": {
+          "path": "mpt-video-control",
+          "buttonLabel": "Run",
+          "appendAttribution": false
+        }
+      },
+      "webhookId": "f2116c9a-56a2-419a-b598-a39b9b5cec8a"
+    },
+    {
+      "id": "78f22721-aaf6-4f24-815c-07f8af69bc9b",
+      "name": "Which Action?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        260,
+        300
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "outputKey": "a0",
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Action }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "Status and quota"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "outputKey": "a1",
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Action }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "Run GPU batch now"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "outputKey": "a2",
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Action }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "Run HunyuanVideo selftest"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "outputKey": "a3",
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Action }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "Get selftest result"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "outputKey": "a4",
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.Action }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "Queue a test clip"
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "3611e149-b2cc-426d-9c12-9dec56f74f1a",
+      "name": "Kaggle: Quota + Status",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        560,
+        0
+      ],
+      "parameters": {
+        "command": "cd /data/yt-scripts/gpu/kaggle && echo QUOTA; python3 kaggle_launch.py quota; echo BATCH_KERNEL; python3 kaggle_launch.py status --mode drive; echo SELFTEST_KERNEL; python3 kaggle_launch.py status --mode selftest 2>&1 | tail -n 40"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "f0d78e89-30d1-48e8-b92a-805042902691",
+      "name": "Show: Status and quota",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        800,
+        0
+      ],
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "text",
+        "completionTitle": "Status and quota",
+        "completionMessage": "={{ String($json.stdout || $json.error || 'no output').slice(-3000) }}"
+      },
+      "webhookId": "f6a56ec7-2fce-48aa-a7dd-01259c06af5d"
+    },
+    {
+      "id": "aed47bb9-51fd-44b1-85b6-9b2edd0826ee",
+      "name": "Kaggle: Ensure Batch Running",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        560,
+        150
+      ],
+      "parameters": {
+        "command": "cd /data/yt-scripts/gpu/kaggle && python3 kaggle_launch.py ensure --mode drive 2>&1 | tail -n 40"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "d378d557-ad65-4453-b170-f82d1be1913d",
+      "name": "Show: Run GPU batch now",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        800,
+        150
+      ],
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "text",
+        "completionTitle": "Run GPU batch now",
+        "completionMessage": "={{ String($json.stdout || $json.error || 'no output').slice(-3000) }}"
+      },
+      "webhookId": "0e90544e-8c99-471b-a4a8-373e4551f2c1"
+    },
+    {
+      "id": "c0c21d2a-fd12-4ca6-a3a6-84d2680bc3b1",
+      "name": "Kaggle: Selftest (only if idle)",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        560,
+        300
+      ],
+      "parameters": {
+        "command": "cd /data/yt-scripts/gpu/kaggle && S=$(python3 kaggle_launch.py status --mode drive); echo \"$S\"; if echo \"$S\" | grep -Eq '\"state\": \"(running|queued)\"'; then echo 'BUSY: the batch kernel is running, try again when it finishes'; else KAGGLE_VIDEO_MODEL=\"${MPT_SELFTEST_MODEL:-hy15-i2v}\" KAGGLE_PARALLEL=1 python3 kaggle_launch.py ensure --mode selftest; fi 2>&1 | tail -n 40"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "57bda072-16a5-4001-9239-09482c31066c",
+      "name": "Show: HunyuanVideo selftest",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        800,
+        300
+      ],
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "text",
+        "completionTitle": "HunyuanVideo selftest",
+        "completionMessage": "={{ String($json.stdout || $json.error || 'no output').slice(-3000) }}"
+      },
+      "webhookId": "f77e7867-4fc8-41a7-8b2d-a489673e30ac"
+    },
+    {
+      "id": "ef60b9ce-0d53-4dc2-81b3-6ee5bad55b9d",
+      "name": "Kaggle: Fetch Selftest Result",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        560,
+        450
+      ],
+      "parameters": {
+        "command": "cd /data/yt-scripts/gpu/kaggle && rm -rf /tmp/mpt_selftest && python3 kaggle_launch.py fetch --mode selftest -o /tmp/mpt_selftest; cat /tmp/mpt_selftest/*.json 2>/dev/null; rm -rf /tmp/mpt_selftest 2>&1 | tail -n 40"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "f4044bd8-de91-47d2-af9d-a42dfca20d66",
+      "name": "Show: Selftest result",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        800,
+        450
+      ],
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "text",
+        "completionTitle": "Selftest result",
+        "completionMessage": "={{ String($json.stdout || $json.error || 'no output').slice(-3000) }}"
+      },
+      "webhookId": "b0c4d14a-f359-4514-803f-2652ad8361d5"
+    },
+    {
+      "id": "78da0a7f-a7a8-428c-aacb-3525ef2a52ce",
+      "name": "Build Test Job",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        600
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const f = $('Video App Control Form').first().json;\nconst prompt = String(f['Test prompt'] || 'A golden coin spinning slowly on a dark wooden desk, soft rim light, cinematic, vertical framing').slice(0, 1500);\nconst model = ['wan21-diffusers', 'ltx-t2v', 'wan22-5b-diffusers', 'hy15-t2v'].includes(f['Model']) ? f['Model'] : 'wan21-diffusers';\nconst ts = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 12);\nconst job_id = `mpt_manual_${ts}_${Math.random().toString(36).slice(2, 6)}`;\nconst now = Date.now();\nconst job = { job_id, channel: 'moneyprinter', format: 'mpt_clips', source: 'manual-form', topic: 'manual test', title: 'manual test',\n  video_model: model, video: { width: 480, height: 832 }, scenes: [{ idx: 0, narration: 'test clip', prompt, sfx: '' }],\n  status: 'pending', created_at: new Date(now).toISOString(), expires_at: new Date(now + 720 * 60000).toISOString(), cpu_fallback: false };\nreturn [{ json: { job_id, model }, binary: { data: { data: Buffer.from(JSON.stringify(job)).toString('base64'), mimeType: 'application/json', fileName: job_id + '.json' } } }];"
+      }
+    },
+    {
+      "id": "e94547da-7fcf-4cc1-bd28-5ed5f85a15d8",
+      "name": "Queue Test Job in Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        700,
+        600
+      ],
+      "parameters": {
+        "resource": "file",
+        "operation": "upload",
+        "name": "={{ $json.job_id }}.json",
+        "inputDataFieldName": "data",
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.LONGCAT_JOBS_FOLDER_ID || '1UZuVceKoUZoUD86POYmhVcazn0in4GAG' }}"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "hWl3Fg2eiftqZane",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "id": "94f5b03d-e374-4a65-9a11-118625c5f139",
+      "name": "Show: Test clip queued",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        800,
+        600
+      ],
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "text",
+        "completionTitle": "Test clip queued",
+        "completionMessage": "=Queued job {{ $('Build Test Job').first().json.job_id }} ({{ $('Build Test Job').first().json.model }}). The GPU Router starts Kaggle within 20 minutes if it is active, or use Run GPU batch now. The clip lands in the Drive outputs folder as <job_id>.scene_000.mp4."
+      },
+      "webhookId": "6237d1e0-c5fe-4a5a-87fd-73a631695173"
+    },
+    {
+      "id": "a9bcdd23-f494-4442-85ae-01f8c6e54d86",
+      "name": "Sticky Note f197b332",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -260
+      ],
+      "parameters": {
+        "content": "## MPT Video App Control (inactive)\nBookmark the production form URL (/form/mpt-video-control). Login = credential MPT Video Control Login (create it before activating).\nRun GPU batch now is safe to press twice: ensure never starts a second kernel. Selftest refuses while the batch kernel runs.",
+        "color": 4,
+        "width": 760,
+        "height": 160
+      }
+    }
+  ],
+  "connections": {
+    "Video App Control Form": {
+      "main": [
+        [
+          {
+            "node": "Which Action?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Which Action?": {
+      "main": [
+        [
+          {
+            "node": "Kaggle: Quota + Status",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Kaggle: Ensure Batch Running",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Kaggle: Selftest (only if idle)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Kaggle: Fetch Selftest Result",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Test Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Kaggle: Quota + Status": {
+      "main": [
+        [
+          {
+            "node": "Show: Status and quota",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Kaggle: Ensure Batch Running": {
+      "main": [
+        [
+          {
+            "node": "Show: Run GPU batch now",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Kaggle: Selftest (only if idle)": {
+      "main": [
+        [
+          {
+            "node": "Show: HunyuanVideo selftest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Kaggle: Fetch Selftest Result": {
+      "main": [
+        [
+          {
+            "node": "Show: Selftest result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Test Job": {
+      "main": [
+        [
+          {
+            "node": "Queue Test Job in Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue Test Job in Drive": {
+      "main": [
+        [
+          {
+            "node": "Show: Test clip queued",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true
+  },
+  "active": false
+}

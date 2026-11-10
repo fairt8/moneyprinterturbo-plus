@@ -1,0 +1,1093 @@
+{
+  "name": "MPT HunyuanVideo Clip Generator",
+  "nodes": [
+    {
+      "id": "f60f84ce-5efd-410a-b060-1bb710af915d",
+      "name": "POST mpt-clips/submit",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "mpt-clips/submit",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "77feccd3-cc55-44a1-aeb8-920a6690c034",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "6rSUorBTBE5iSv95",
+          "name": "MoneyPrinter Upload Token"
+        }
+      }
+    },
+    {
+      "id": "9a4166f1-bb56-4389-a983-30a4ca08288d",
+      "name": "Submit: Build MPT Job",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// MoneyPrinter scene prompts -> one Drive job in the shared GPU queue (same format the GPU Bridge claims).\nconst b = $json.body || $json;\nconst bad = (error, fallback) => [{ json: { ok: false, fallback: !!fallback, error } }];\nif (String($env.MPT_GPU_CLIPS || 'on').toLowerCase() === 'off') return bad('gpu_clips_off', true);\nconst scenes = Array.isArray(b.scenes) ? b.scenes : [];\nif (!scenes.length || scenes.length > 12) return bad('scenes must contain 1-12 items');\nconst MODELS = ['wan21-diffusers', 'ltx-t2v', 'wan22-5b-diffusers', 'hy15-i2v', 'hy15-t2v'];\nconst model = MODELS.includes(b.video_model) ? b.video_model : (MODELS.includes($env.MPT_CLIP_MODEL) ? $env.MPT_CLIP_MODEL : 'wan21-diffusers');\nconst ref = String(b.ref || 'short').replace(/[^A-Za-z0-9]/g, '').slice(0, 24) || 'short';\nconst ts = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 12);\nconst job_id = `mpt_${ref}_${ts}_${Math.random().toString(36).slice(2, 6)}`;\nconst W = Math.min(1280, Math.max(256, Number(b.width) || 480)), H = Math.min(1280, Math.max(256, Number(b.height) || 832));\nconst ttl = Math.min(720, Math.max(30, Number(b.deadline_min) || Number($env.MPT_CLIP_TTL_MIN) || 150));\nconst sc = scenes.map((s, i) => {\n  const o = { idx: Number.isInteger(s.idx) ? s.idx : i, narration: String(s.narration || '').slice(0, 600),\n              prompt: String(s.prompt || b.topic || 'personal finance concept, cinematic, soft light').slice(0, 1500), sfx: '' };\n  const img = String(s.image_b64 || '');\n  if (img && img.length < 400000 && /^[A-Za-z0-9+/=]+$/.test(img)) o.image_b64 = img;   // JPEG first frame for image-to-video\n  return o;\n});\nif (model === 'hy15-i2v' && sc.some(s => !s.image_b64)) return bad('hy15-i2v needs image_b64 (JPEG, <300 KB) on every scene');\nconst now = Date.now();\nconst job = { job_id, channel: 'moneyprinter', format: 'mpt_clips', source: 'moneyprinterturbo',\n  topic: String(b.topic || '').slice(0, 200), title: String(b.title || '').slice(0, 200), video_model: model,\n  video: { width: W, height: H }, scenes: sc, status: 'pending', created_at: new Date(now).toISOString(),\n  expires_at: new Date(now + ttl * 60000).toISOString(), cpu_fallback: false };\nreturn [{ json: { ok: true, job_id, scenes: sc.length, video_model: model, expires_at: job.expires_at },\n  binary: { data: { data: Buffer.from(JSON.stringify(job)).toString('base64'), mimeType: 'application/json', fileName: job_id + '.json' } } }];"
+      }
+    },
+    {
+      "id": "b8a16eb2-eb43-4839-9f1d-45e425e21590",
+      "name": "Submit: Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "530bff18-191b-421f-9024-17c323b38268",
+      "name": "Submit: Queue Job in Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        660,
+        -100
+      ],
+      "parameters": {
+        "resource": "file",
+        "operation": "upload",
+        "name": "={{ $json.job_id }}.json",
+        "inputDataFieldName": "data",
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.LONGCAT_JOBS_FOLDER_ID || '1UZuVceKoUZoUD86POYmhVcazn0in4GAG' }}"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "hWl3Fg2eiftqZane",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "id": "e19792ae-8cce-4b96-971e-ca709a30a0be",
+      "name": "Submit: Respond Queued",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        880,
+        -100
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, status: \"queued\", job_id: $(\"Submit: Build MPT Job\").first().json.job_id, job_file_id: $json.id, video_model: $(\"Submit: Build MPT Job\").first().json.video_model, expires_at: $(\"Submit: Build MPT Job\").first().json.expires_at }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "6d327f83-0703-4320-82df-e3e69d30e0db",
+      "name": "Submit: Respond Fallback/Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        660,
+        100
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, status: $json.fallback ? \"fallback\" : \"error\", error: $json.error }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "fe8ff577-6132-4604-88b5-6116c8d84d36",
+      "name": "POST mpt-clips/status",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        400
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "mpt-clips/status",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "ae79e026-ade6-4d04-b3ba-0df48f40b4d1",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "6rSUorBTBE5iSv95",
+          "name": "MoneyPrinter Upload Token"
+        }
+      }
+    },
+    {
+      "id": "94ab32c1-4d20-4269-9baf-c38a55a8d49e",
+      "name": "Status: Valid Id?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        220,
+        400
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ /^mpt_[A-Za-z0-9_\\-]+$/.test($json.body?.job_id || '') }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            },
+            {
+              "leftValue": "={{ /^[A-Za-z0-9_\\-]+$/.test($json.body?.job_file_id || \"\") }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "a1fa972a-7206-447d-abbc-70400f9a4020",
+      "name": "Status: Find Manifest",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        440,
+        340
+      ],
+      "parameters": {
+        "resource": "fileFolder",
+        "operation": "search",
+        "searchMethod": "query",
+        "queryString": "=name = '{{ $json.body.job_id }}.done.json' and trashed = false and '{{ $env.LONGCAT_OUTPUTS_FOLDER_ID || '1oiVxpps11_xFyhkQ6eBjklA1HhR3_XJR' }}' in parents",
+        "returnAll": false,
+        "limit": 1,
+        "filter": {},
+        "options": {
+          "fields": [
+            "id",
+            "name"
+          ]
+        }
+      },
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "hWl3Fg2eiftqZane",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "id": "81a84fbe-6d16-4781-8a39-bf2ec8fd2e61",
+      "name": "Status: Finished?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        660,
+        340
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "d98ee069-7b10-4e53-bda0-1e159bdcf6ba",
+      "name": "Status: Download Manifest",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        880,
+        240
+      ],
+      "parameters": {
+        "resource": "file",
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.id }}"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "hWl3Fg2eiftqZane",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "id": "cf5317ec-08b4-4830-88cb-9047f92871b1",
+      "name": "Status: Read Clips",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        240
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const m = JSON.parse((await this.helpers.getBinaryDataBuffer(0, 'data')).toString('utf8'));\nconst req = $('POST mpt-clips/status').first().json.body || {};\nif (m.job_id !== req.job_id) throw new Error('manifest job_id mismatch');\nreturn [{ json: { status: 'done', job_id: m.job_id, gpu_backend: m.gpu_backend || '', sources: m.gpu_sources || {},\n  clips: (m.clips || []).map(c => ({ name: c.name, file_id: c.file_id })) } }];"
+      }
+    },
+    {
+      "id": "c2e6405a-4d84-4583-bc5d-e4a569d60f7e",
+      "name": "Status: Respond Done",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1320,
+        240
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "e9670d2e-a1ef-42dd-a1e1-93d411845f51",
+      "name": "Status: Download Job",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        880,
+        440
+      ],
+      "parameters": {
+        "resource": "file",
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $(\"POST mpt-clips/status\").first().json.body.job_file_id }}"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "hWl3Fg2eiftqZane",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "id": "65a14f23-9a10-485a-9495-4070ff86520b",
+      "name": "Status: Decide",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        440
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Not finished yet: decide queued / rendering / fallback. Fallback cancels the job so no worker (GPU or CPU) renders it later.\nconst req = $('POST mpt-clips/status').first().json.body || {};\nlet j;\ntry { j = JSON.parse((await this.helpers.getBinaryDataBuffer(0, 'data')).toString('utf8')); }\ncatch (e) { return [{ json: { action: 'respond', status: 'fallback', reason: 'job_file_unreadable' } }]; }\nif (!j || j.job_id !== req.job_id || !/^mpt_/.test(j.job_id)) return [{ json: { action: 'respond', status: 'error', reason: 'job_mismatch' } }];\nif (j.status === 'done') return [{ json: { action: 'respond', status: 'finishing' } }];\nif (j.status === 'cancelled' || j.status === 'failed') return [{ json: { action: 'respond', status: 'fallback', reason: j.cancel_reason || j.status } }];\nlet reason = '';\nif (req.cancel) reason = 'cancelled_by_caller';\nelse if (j.expires_at && Date.now() > Date.parse(j.expires_at)) reason = 'expired';\nelse if ((j.gpu_fail_count || 0) >= Number($env.GPU_MAX_FAILS || 2)) reason = 'gpu_failed';\nif (!reason) return [{ json: { action: 'respond', status: j.claimed_at ? 'rendering' : 'queued', claimed_by: j.claimed_by || null, expires_at: j.expires_at || null } }];\nconst nj = { ...j, status: 'cancelled', cancel_reason: reason, cancelled_at: new Date().toISOString(), claimed_at: null, claimed_by: null };\nreturn [{ json: { action: 'cancel', status: 'fallback', reason, job_file_id: req.job_file_id },\n  binary: { data: { data: Buffer.from(JSON.stringify(nj)).toString('base64'), mimeType: 'application/json', fileName: j.job_id + '.json' } } }];"
+      }
+    },
+    {
+      "id": "e5d669ce-9566-472f-b121-b2eef71b420b",
+      "name": "Status: Cancel Job?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1320,
+        440
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "cancel",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "3ebc4bad-ad69-4067-ada3-70ca2143c7c3",
+      "name": "Status: Save Cancelled Job",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1540,
+        380
+      ],
+      "parameters": {
+        "resource": "file",
+        "operation": "update",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.job_file_id }}"
+        },
+        "changeFileContent": true,
+        "inputDataFieldName": "data",
+        "updateFields": {}
+      },
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "hWl3Fg2eiftqZane",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "id": "8c52ef03-57e1-47d2-93d1-4750ddcfc414",
+      "name": "Status: Respond Fallback",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1760,
+        380
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: \"fallback\", reason: $(\"Status: Decide\").first().json.reason }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "9a58ceff-a274-47a7-a743-a4181a8bb975",
+      "name": "Status: Respond Pending",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1540,
+        520
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: $json.status, reason: $json.reason || null, claimed_by: $json.claimed_by || null, expires_at: $json.expires_at || null }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "872c360a-8e0b-4bc8-b2e4-1afd0d60b8ad",
+      "name": "Status: Respond Bad Request",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        440,
+        520
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"status\":\"error\",\"reason\":\"bad job_id or job_file_id\"}",
+        "options": {
+          "responseCode": 400
+        }
+      }
+    },
+    {
+      "id": "2ac4bb38-c3e9-48ac-bb57-d81c210e9815",
+      "name": "POST mpt-clips/clip",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        800
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "mpt-clips/clip",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "88749bd1-cbc4-45b4-8a39-1c1df51127e4",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "6rSUorBTBE5iSv95",
+          "name": "MoneyPrinter Upload Token"
+        }
+      }
+    },
+    {
+      "id": "18661dd8-e111-4b5f-b737-8668179a7246",
+      "name": "Clip: Valid Request?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        220,
+        800
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ /^mpt_[A-Za-z0-9_\\-]+$/.test($json.body?.job_id || '') }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            },
+            {
+              "leftValue": "={{ /^[A-Za-z0-9_\\-]+$/.test($json.body?.file_id || \"\") }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "f88dd9e1-acba-4739-ab65-4468a0c4b352",
+      "name": "Clip: Download from Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        440,
+        740
+      ],
+      "parameters": {
+        "resource": "file",
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.body.file_id }}"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "hWl3Fg2eiftqZane",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "id": "b60e0be6-901e-404f-9ac4-fafbc86a5165",
+      "name": "Clip: Check It Belongs to Job",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        740
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const b = $('POST mpt-clips/clip').first().json.body || {};\nconst it = $input.first(); const name = (it.binary && it.binary.data && it.binary.data.fileName) || '';\nif (!/^mpt_[A-Za-z0-9_\\-]+$/.test(b.job_id || '') || !name.startsWith(b.job_id + '.scene_') || !/\\.mp4$/.test(name))\n  throw new Error('file does not belong to this MoneyPrinter job');\nreturn [{ json: { name }, binary: { data: it.binary.data } }];"
+      }
+    },
+    {
+      "id": "6241767b-b538-4fce-b9b4-4a2c9967b16b",
+      "name": "Clip: Respond MP4",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        880,
+        740
+      ],
+      "parameters": {
+        "respondWith": "binary",
+        "responseDataSource": "set",
+        "inputFieldName": "data",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "c182469c-5c17-4215-821e-8a1c9f4d8149",
+      "name": "Clip: Respond Bad Request",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        440,
+        900
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"status\":\"error\",\"reason\":\"bad job_id or file_id\"}",
+        "options": {
+          "responseCode": 400
+        }
+      }
+    },
+    {
+      "id": "619cb73d-0f08-4ece-a682-42776d317b52",
+      "name": "POST mpt-clips/cleanup",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        1150
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "mpt-clips/cleanup",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "6122a69c-8f1e-4d3e-9ad1-74fe085a323e",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "6rSUorBTBE5iSv95",
+          "name": "MoneyPrinter Upload Token"
+        }
+      }
+    },
+    {
+      "id": "84772a5b-6cb1-4989-8203-8735f7a5b8f0",
+      "name": "Cleanup: Valid Id?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        220,
+        1150
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ /^mpt_[A-Za-z0-9_\\-]+$/.test($json.body?.job_id || '') }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "e65928b3-c418-493f-9697-766479fd5c39",
+      "name": "Cleanup: Find Job Files",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        440,
+        1100
+      ],
+      "parameters": {
+        "resource": "fileFolder",
+        "operation": "search",
+        "searchMethod": "query",
+        "queryString": "=name contains '{{ $json.body.job_id }}.' and trashed = false and ('{{ $env.LONGCAT_JOBS_FOLDER_ID || '1UZuVceKoUZoUD86POYmhVcazn0in4GAG' }}' in parents or '{{ $env.LONGCAT_OUTPUTS_FOLDER_ID || '1oiVxpps11_xFyhkQ6eBjklA1HhR3_XJR' }}' in parents)",
+        "returnAll": true,
+        "filter": {},
+        "options": {
+          "fields": [
+            "id",
+            "name"
+          ]
+        }
+      },
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "hWl3Fg2eiftqZane",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "id": "5fa1e9b2-7765-4f59-acbc-125c5a4d8e37",
+      "name": "Cleanup: Only This Job",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        1100
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const b = $('POST mpt-clips/cleanup').first().json.body || {};\nif (!/^mpt_[A-Za-z0-9_\\-]+$/.test(b.job_id || '')) return [];\nreturn $input.all().filter(i => i.json.id && String(i.json.name || '').startsWith(b.job_id + '.'));"
+      }
+    },
+    {
+      "id": "5c47920d-e87b-4b76-ade1-79dc8b4b2a0b",
+      "name": "Cleanup: Move to Drive Bin",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        880,
+        1100
+      ],
+      "parameters": {
+        "resource": "file",
+        "operation": "deleteFile",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.id }}"
+        },
+        "options": {
+          "deletePermanently": false
+        }
+      },
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "hWl3Fg2eiftqZane",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "id": "4f40a2ed-46b7-4cfa-8bad-20f368831c4a",
+      "name": "Cleanup: Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1100,
+        1100
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, trashed: $input.all().length }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "e5c0a82c-2c17-4712-8f26-5a9d8fde57a8",
+      "name": "Cleanup: Respond Bad Request",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        440,
+        1250
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"ok\":false,\"reason\":\"bad job_id\"}",
+        "options": {
+          "responseCode": 400
+        }
+      }
+    },
+    {
+      "id": "cff97e33-36f6-49b1-9e8a-354440bd2c10",
+      "name": "Sticky Note 78c0c0c5",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -360
+      ],
+      "parameters": {
+        "content": "## MPT HunyuanVideo Clip Generator (inactive)\nMoneyPrinterTurbo -> shared GPU Drive queue -> existing GPU Bridge/Router (Kaggle 2xT4 batch, no tunnel).\nThis workflow never starts Kaggle. Jobs are prefixed mpt_ so YouTube Auto B/S2 ignore them.\nFallback: status returns \"fallback\" (expired, GPU failed, gpu_clips_off) and the job is cancelled so nothing renders it later; MPT then uses its FLUX images + Ken Burns.\nAuth: header token = credential \"MoneyPrinter Upload Token\". Env: MPT_GPU_CLIPS=on|off, MPT_CLIP_MODEL, MPT_CLIP_TTL_MIN.",
+        "color": 5,
+        "width": 900,
+        "height": 220
+      }
+    }
+  ],
+  "connections": {
+    "POST mpt-clips/submit": {
+      "main": [
+        [
+          {
+            "node": "Submit: Build MPT Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit: Build MPT Job": {
+      "main": [
+        [
+          {
+            "node": "Submit: Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit: Valid?": {
+      "main": [
+        [
+          {
+            "node": "Submit: Queue Job in Drive",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Submit: Respond Fallback/Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit: Queue Job in Drive": {
+      "main": [
+        [
+          {
+            "node": "Submit: Respond Queued",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST mpt-clips/status": {
+      "main": [
+        [
+          {
+            "node": "Status: Valid Id?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status: Valid Id?": {
+      "main": [
+        [
+          {
+            "node": "Status: Find Manifest",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Status: Respond Bad Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status: Find Manifest": {
+      "main": [
+        [
+          {
+            "node": "Status: Finished?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status: Finished?": {
+      "main": [
+        [
+          {
+            "node": "Status: Download Manifest",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Status: Download Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status: Download Manifest": {
+      "main": [
+        [
+          {
+            "node": "Status: Read Clips",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status: Read Clips": {
+      "main": [
+        [
+          {
+            "node": "Status: Respond Done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status: Download Job": {
+      "main": [
+        [
+          {
+            "node": "Status: Decide",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status: Decide": {
+      "main": [
+        [
+          {
+            "node": "Status: Cancel Job?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status: Cancel Job?": {
+      "main": [
+        [
+          {
+            "node": "Status: Save Cancelled Job",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Status: Respond Pending",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status: Save Cancelled Job": {
+      "main": [
+        [
+          {
+            "node": "Status: Respond Fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST mpt-clips/clip": {
+      "main": [
+        [
+          {
+            "node": "Clip: Valid Request?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clip: Valid Request?": {
+      "main": [
+        [
+          {
+            "node": "Clip: Download from Drive",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Clip: Respond Bad Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clip: Download from Drive": {
+      "main": [
+        [
+          {
+            "node": "Clip: Check It Belongs to Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clip: Check It Belongs to Job": {
+      "main": [
+        [
+          {
+            "node": "Clip: Respond MP4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST mpt-clips/cleanup": {
+      "main": [
+        [
+          {
+            "node": "Cleanup: Valid Id?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cleanup: Valid Id?": {
+      "main": [
+        [
+          {
+            "node": "Cleanup: Find Job Files",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Cleanup: Respond Bad Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cleanup: Find Job Files": {
+      "main": [
+        [
+          {
+            "node": "Cleanup: Only This Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cleanup: Only This Job": {
+      "main": [
+        [
+          {
+            "node": "Cleanup: Move to Drive Bin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cleanup: Move to Drive Bin": {
+      "main": [
+        [
+          {
+            "node": "Cleanup: Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true
+  },
+  "active": false
+}

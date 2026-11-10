@@ -1,0 +1,11 @@
+--- a/app/services/autopilot.py
++++ b/app/services/autopilot.py
+@@ -385,7 +385,7 @@
+         pass
+     _current["task_id"] = task_id
+ 
+-    deadline = time.time() + 60 * 60
++    deadline = time.time() + 60 * float(_env("AUTO_RENDER_TIMEOUT_MIN", "60") or 60)   # raise to ~150 when GPU clips are on
+     task = {}
+     while time.time() < deadline:
+         task = sm.state.get_task(task_id) or {}

@@ -1,0 +1,174 @@
+--- a/scripts/gpu/t4_models.py
++++ b/scripts/gpu/t4_models.py
+@@ -7,6 +7,13 @@
+              Default for normal scene clips. Several minutes per ~3 s clip on a T4 (estimate, untested here).
+   LTXT2V     Lightricks/LTX-Video-0.9.5 (2B, LTX open-weights licence). Text-to-video, much faster than Wan, lower quality.
+   Wan22TI2VDiffusers  Wan-AI/Wan2.2-TI2V-5B-Diffusers (Apache-2.0). Experimental on a T4: needs offload, 480p-ish sizes only.
++  Hunyuan15  (PROPOSED, untested on a T4) tencent HunyuanVideo-1.5 8.3B via diffusers HunyuanVideo15*Pipeline.
++             "hy15-i2v": 480p image-to-video STEP-DISTILLED (8-12 steps) - animates a still (e.g. the FLUX scene image).
++             "hy15-t2v": 480p text-to-video CFG-distilled (needs ~30-50 steps, so ~3-4x slower than i2v).
++             The fp16 transformer (16.6 GB) + Qwen2.5-VL-7B text encoder (~14 GB) do not fit a 16 GB T4 or Kaggle's 29 GB RAM
++             as-is, so both are loaded 4-bit NF4 with bitsandbytes (~5 GB each) + model CPU offload + VAE tiling.
++             One worker per kernel is the safe setting (KAGGLE_PARALLEL=1) until a selftest proves two fit in RAM.
++             Licence: Tencent Hunyuan Community License (not valid in the EU, UK, South Korea; >100M MAU needs a licence).
+ 
+ Image-to-video for Animated Story stays in worker.py (LTXI2V = LTX-Video 2B). One model instance per GPU:
+ run one worker process per GPU with CUDA_VISIBLE_DEVICES=0 / 1 (kaggle/kernel_main.py does this).
+@@ -93,4 +100,55 @@
+         export_to_video(frames, out, fps=24); self.torch.cuda.empty_cache()
+ 
+ 
+-T2V = {"wan21-diffusers": Wan21T2V, "ltx-t2v": LTXT2V, "wan22-5b-diffusers": Wan22TI2VDiffusers}
++class Hunyuan15:
++    """HunyuanVideo-1.5 480p on one T4: NF4 transformer + NF4 text encoder, CPU offload, tiled VAE. Seconds are capped short
++    (default 61 frames @24 fps ~2.5 s) because T4 attention cost grows ~quadratically with frames; assembly loops/holds."""
++    REPOS = {"i2v": "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_i2v_step_distilled",
++             "t2v": "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v_distilled"}
++
++    def __init__(self, mode="i2v"):
++        import torch
++        from diffusers import PipelineQuantizationConfig
++        self.torch, self.mode = torch, mode
++        mid = os.environ.get("HY15_%s_MODEL" % mode.upper(), self.REPOS[mode])
++        dt = torch.bfloat16 if os.environ.get("HY15_DTYPE") == "bf16" else _dtype(torch)   # fp16 on T4; bf16 if fp16 gives NaN/black
++        q = PipelineQuantizationConfig(quant_backend="bitsandbytes_4bit",
++                                       quant_kwargs={"load_in_4bit": True, "bnb_4bit_quant_type": "nf4", "bnb_4bit_compute_dtype": dt},
++                                       components_to_quantize=os.environ.get("HY15_QUANTIZE", "transformer,text_encoder").split(","))
++        if mode == "i2v":
++            from diffusers import HunyuanVideo15ImageToVideoPipeline as P
++        else:
++            from diffusers import HunyuanVideo15Pipeline as P
++        self.pipe = P.from_pretrained(mid, quantization_config=q, torch_dtype=dt)
++        self.pipe.enable_model_cpu_offload()
++        try: self.pipe.vae.enable_tiling()
++        except Exception: pass
++        self.steps = int(os.environ.get("HY15_STEPS", 8 if mode == "i2v" else 30))   # i2v step-distilled: 8 fast / 12 best
++        self.max_frames = int(os.environ.get("HY15_MAX_FRAMES", 61))                    # 4k+1; 121 = 5 s (much slower)
++
++    def __call__(self, c, out):
++        import base64, io
++        import numpy as np
++        from diffusers.utils import export_to_video
++        n = _frames(c.get("seconds") or 3, 24, self.max_frames, 4)
++        g = self.torch.Generator("cpu").manual_seed(42 + int(c.get("idx", 0)))
++        neg = c.get("negative") or "blurry, low quality, distorted, watermark, text, subtitles, static, jittery"
++        if self.mode == "i2v":
++            from PIL import Image
++            if not c.get("image_b64"): raise RuntimeError("hy15-i2v needs scene.image_b64")
++            img = Image.open(io.BytesIO(base64.b64decode(c["image_b64"]))).convert("RGB")   # size/aspect come from the image
++            frames = self.pipe(image=img, prompt=c["prompt"], negative_prompt=neg, num_frames=n,
++                               num_inference_steps=self.steps, generator=g).frames[0]
++        else:
++            w, h = (848, 480) if c["width"] >= c["height"] else (480, 848)
++            frames = self.pipe(prompt=c["prompt"], negative_prompt=neg, height=h, width=w, num_frames=n,
++                               num_inference_steps=self.steps, generator=g).frames[0]
++        arr = np.asarray(frames[len(frames) // 2], dtype=np.float32)
++        if not np.isfinite(arr).all() or arr.max() < 0.02:                              # fp16 overflow -> black/NaN frames
++            raise RuntimeError("HunyuanVideo produced black/NaN frames (try HY15_DTYPE=bf16)")
++        export_to_video(frames, out, fps=24); self.torch.cuda.empty_cache()
++
++
++T2V = {"wan21-diffusers": Wan21T2V, "ltx-t2v": LTXT2V, "wan22-5b-diffusers": Wan22TI2VDiffusers,
++       "hy15-i2v": lambda: Hunyuan15("i2v"), "hy15-t2v": lambda: Hunyuan15("t2v")}
++MODEL_NAMES = list(T2V)
+--- a/scripts/gpu/kaggle/yta_gpu_worker.py
++++ b/scripts/gpu/kaggle/yta_gpu_worker.py
+@@ -54,7 +54,7 @@
+     ap.add_argument("--bridge", default=E("GPU_BRIDGE_URL", "http://127.0.0.1:5678/webhook/gpu-bridge"))
+     ap.add_argument("--token", default=E("GPU_BRIDGE_TOKEN", ""))
+     ap.add_argument("--backend", default=E("GPU_BACKEND", "gpu"), choices=["gpu", "cpu", "mock"])
+-    ap.add_argument("--model", default=E("T2V_MODEL", "wan21-diffusers"), choices=["wan21-diffusers", "ltx-t2v", "wan22-5b-diffusers"])
++    ap.add_argument("--model", default=E("T2V_MODEL", "wan21-diffusers"), choices=["wan21-diffusers", "ltx-t2v", "wan22-5b-diffusers", "hy15-i2v", "hy15-t2v"])
+     ap.add_argument("--name", default=E("WORKER_NAME", socket.gethostname()))
+     ap.add_argument("--max-jobs", type=int, default=int(E("MAX_JOBS", 0) or 0), help="0 = until the queue is empty")
+     ap.add_argument("--deadline-min", type=float, default=float(E("WORKER_DEADLINE_MIN", 0) or 0))
+@@ -63,7 +63,7 @@
+     if not a.token: sys.exit("GPU_BRIDGE_TOKEN missing")
+     H = {"X-Bridge-Token": a.token}
+     stop_at = time.time() + a.deadline_min * 60 if a.deadline_min else None
+-    gen, done_jobs, name = None, 0, f"{a.name}-{a.backend}"
++    gen, gen_model, done_jobs, name = None, None, 0, f"{a.name}-{a.backend}"
+ 
+     def post(path, **kw):
+         tmo = kw.pop("timeout", 120)
+@@ -84,7 +84,15 @@
+         if not job: print("[worker] queue empty, exiting", flush=True); break
+         jid, jfid = job["job_id"], got.get("job_file_id", "")
+         try:
+-            if gen is None: gen = build(a.backend, a.model)
++            # per-job model (MoneyPrinter jobs set job.video_model; YT Auto jobs keep the kernel default)
++            want = job.get("video_model") if a.backend == "gpu" and job.get("video_model") else a.model
++            if gen is None or gen_model != want:
++                if gen is not None:
++                    import gc; gen = None; gc.collect()
++                    try:
++                        import torch; torch.cuda.empty_cache()
++                    except Exception: pass
++                gen, gen_model = build(a.backend, want), want
+             v = job.get("video") or {}
+             W, H_ = int(v.get("width") or 480), int(v.get("height") or 832)
+             clips, src = [], {}
+@@ -93,7 +101,7 @@
+                 i = int(sc.get("idx", len(clips))); nm = f"scene_{i:03d}.mp4"
+                 out = os.path.join(tempfile.gettempdir(), f"{jid}_{nm}")
+                 c = {"id": f"{jid}-{i}", "idx": i, "prompt": sc.get("prompt") or job.get("topic") or "abstract", "width": W, "height": H_,
+-                     "seconds": scene_seconds(sc), "attempts": 1}
++                     "seconds": scene_seconds(sc), "attempts": 1, "image_b64": sc.get("image_b64") or ""}
+                 t0 = time.time(); used = gen(c, out)
+                 body = open(out, "rb").read()          # bytes, so a retried upload resends the whole file
+                 r = post("clip", data={"job_id": jid, "name": nm}, files={"file": (f"{jid}.{nm}", body, "video/mp4")}, timeout=600)
+--- a/scripts/gpu/kaggle/kernel_main.py
++++ b/scripts/gpu/kaggle/kernel_main.py
+@@ -33,6 +33,8 @@
+ 
+ def main():
+     t_start = time.time()
++    os.environ.setdefault("HF_HOME", "/tmp/hf")
++    os.environ.update({k: str(v) for k, v in (CONFIG.get("env") or {}).items()})   # HY15_* / WAN_* / LTX_* knobs
+     root = CONFIG.get("workdir") or ("/kaggle/working/yta" if os.path.isdir("/kaggle") else "/tmp/yta_kernel")
+     os.makedirs(root, exist_ok=True)
+     tarfile.open(fileobj=io.BytesIO(base64.b64decode(PAYLOAD)), mode="r:gz").extractall(root)
+@@ -40,7 +42,7 @@
+     if not sim:
+         log("installing python packages")
+         subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-U", "diffusers>=0.33", "transformers", "accelerate",
+-                        "sentencepiece", "imageio", "imageio-ffmpeg", "ftfy", "requests", "protobuf"], check=False)
++                        "sentencepiece", "imageio", "imageio-ffmpeg", "ftfy", "requests", "protobuf", "bitsandbytes>=0.45", "pillow", "numpy"], check=False)
+         subprocess.run(["nvidia-smi"], check=False)
+         try:
+             import torch; gpus = torch.cuda.device_count()
+@@ -61,6 +63,13 @@
+             from worker import mock_clip; mock_clip(c, out); model = "mock"
+         else:
+             import t4_models; model = CONFIG.get("video_model", "wan21-diffusers")
++            if model == "hy15-i2v":   # image-to-video selftest needs a first frame: a plain warm gradient (no download)
++                from PIL import Image
++                import numpy as np
++                y = np.linspace(0, 1, 832)[:, None, None]; x = np.linspace(0, 1, 480)[None, :, None]
++                arr = (np.concatenate([0.9 - 0.4 * y + 0 * x, 0.6 - 0.3 * y + 0.1 * x, 0.2 + 0.2 * x + 0 * y], 2) * 255).astype("uint8")
++                buf = io.BytesIO(); Image.fromarray(arr).save(buf, "JPEG", quality=90)
++                c["image_b64"] = base64.b64encode(buf.getvalue()).decode()
+             gen = t4_models.T2V[model](); t_load = time.time() - t0; gen(c, out)
+         info = {"model": model, "gpus": gpus, "seconds_total": round(time.time() - t0, 1), "file": os.path.basename(out),
+                 "bytes": os.path.getsize(out)}
+@@ -78,7 +87,8 @@
+             if procs[0].poll() is not None: log("GPU 0 worker already finished; queue empty"); break
+             if free_ram_gb() < float(CONFIG.get("min_free_ram_gb", 14)):
+                 log(f"only {free_ram_gb():.1f} GB RAM free -> staying on one GPU"); break
+-        env = dict(os.environ, CUDA_VISIBLE_DEVICES=str(i), ONE_MODEL="1", PYTHONUNBUFFERED="1")
++        env = dict(os.environ, CUDA_VISIBLE_DEVICES=str(i), ONE_MODEL="1", PYTHONUNBUFFERED="1",
++                   HF_HOME=os.environ.get("HF_HOME", "/tmp/hf"))   # HunyuanVideo-1.5 weights are ~35 GB: keep them out of /kaggle/working (20 GB)
+         name = f"kaggle-gpu{i}"
+         if CONFIG["mode"] == "app":
+             cmd = [py, os.path.join(root, "worker.py"), "--server", CONFIG["server"], "--token", tok, "--once",
+--- a/scripts/gpu/kaggle/kaggle_launch.py
++++ b/scripts/gpu/kaggle/kaggle_launch.py
+@@ -112,6 +112,8 @@
+                 "min_free_ram_gb": float(E("KAGGLE_MIN_FREE_RAM_GB", "14")),
+                 "simulate": E("KAGGLE_SIMULATE") == "1", "gpus": int(E("KAGGLE_SIM_GPUS", "2"))})
+     if E("KAGGLE_SIM_WORKDIR"): cfg["workdir"] = E("KAGGLE_SIM_WORKDIR")
++    # model tuning knobs travel to the Kaggle session (t4_models.py reads them there); no secrets match these prefixes
++    cfg["env"] = {k: v for k, v in os.environ.items() if k.startswith(("HY15_", "WAN_", "LTX_"))}
+     buf = io.BytesIO()
+     with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+         for f in FILES[mode]: tf.add(f, arcname=os.path.basename(f))

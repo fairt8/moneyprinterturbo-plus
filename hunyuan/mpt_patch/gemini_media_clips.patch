@@ -1,0 +1,46 @@
+--- a/app/services/gemini_media.py
++++ b/app/services/gemini_media.py
+@@ -76,6 +76,7 @@
+     prompt: str = ""
+     image_path: str = ""
+     image_provider: str = ""
++    clip_path: str = ""          # optional AI video clip (gpu_clips); used instead of the Ken Burns still
+ 
+ 
+ @dataclass
+@@ -485,6 +486,16 @@
+         seconds = scene.duration + (fade if index < len(scenes) - 1 else 0.0)
+         frames = max(int(math.ceil(seconds * _FPS)), 2)
+         lengths.append(frames / _FPS)
++        if scene.clip_path:
++            # AI clip: loop it in memory (clips are short, ~2-5 s at 480p) if it is shorter than the
++            # narration, cut to length, then match the stills' size, fps and timebase for xfade.
++            inputs += ["-i", scene.clip_path]
++            chains.append(
++                f"[{index}:v]loop=loop=-1:size=32767,trim=duration={frames / _FPS:.3f},setpts=PTS-STARTPTS,"
++                f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1,"
++                f"fps={_FPS},format=yuv420p,settb=AVTB[v{index}]"
++            )
++            continue
+         inputs += ["-i", scene.image_path]
+         move = _MOVES[index % len(_MOVES)]
+         chains.append(
+@@ -575,6 +586,18 @@
+             scene.image_path = donor.image_path
+             scene.image_provider = "reused"
+ 
++    # Optional: animate the scenes with free Kaggle GPU clips (n8n video app). Any failure keeps the stills.
++    try:
++        from app.services import gpu_clips
++        if gpu_clips.enabled():
++            w, h = (480, 832) if aspect == VideoAspect.portrait else (832, 480)
++            for idx, clip in gpu_clips.fetch_clips(task_id, scenes, work_dir, w, h, subject).items():
++                if 0 <= idx < len(scenes):
++                    scenes[idx].clip_path = clip
++                    providers["gpu-clip"] = providers.get("gpu-clip", 0) + 1
++    except Exception as exc:
++        logger.warning(f"ai visuals: gpu clips skipped: {exc}")
++
+     output = os.path.join(work_dir, "ai-visuals.mp4")
+     started = time.time()
+     render_scenes(scenes, aspect, output)

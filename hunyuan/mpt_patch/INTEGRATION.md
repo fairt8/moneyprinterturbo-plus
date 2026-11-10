@@ -31,3 +31,6 @@ AUTO_SCHEDULE_TIMES=07:00,16:00                                # start ~2 h earl
 - Any error at any step means MoneyPrinter uses the stills for that video. Partial results also work: scenes without a clip use stills.
 - Manual Telegram renders go through the same code. Set `VIDEO_CLIP_WAIT_MIN` lower, or leave the feature off, if you want instant manual videos.
   An optional later step is a `/clips` Telegram command that shows `kaggle_launch.py quota`, but the n8n control form already covers this.
+
+## Before activating: use the GPU Bridge enqueue path
+YouTube Auto's Kaggle path now shuts itself off when idle and wakes instantly only for jobs that arrive through **GPU Bridge `POST /enqueue`** (or the GPU Router "Job Arrived" webhook). Jobs dropped straight into the Drive folder wait for the 20-minute poll. Before activation, the "MPT HunyuanVideo Clip Generator" submit step should call `/enqueue` with the GPU Bridge Token credential instead of writing the Drive file directly.
